@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -91,87 +92,76 @@ func getRooms(token string) []*room {
 	return rooms
 }
 
-func getRoomName(token string, roomId string) string {
-	url := baseUrl + "/rooms/" + roomId + "/messages"
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		log.Fatalf("Failed to retrieve room name: %v", err)
-	}
-	q := req.URL.Query()
-	q.Set("access_token", token)
-	q.Set("dir", "b")
-	q.Set("limit", "1")
-	q.Set("filter", `{"types": ["m.room.name"]}`)
-	req.URL.RawQuery = q.Encode()
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Fatalf("Failed to retrieve room name: %v", err)
-	}
-	defer resp.Body.Close()
-	var respJson map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&respJson)
-	if err != nil {
-		log.Fatalf("Failed to retrieve room name: %v", err)
-	}
-	chunk, ok := respJson["chunk"].([]interface{})
-	if !ok || len(chunk) == 0 {
-		return ""
-	}
-	message, ok := chunk[0].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-	content, ok := message["content"].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-	name, ok := content["name"].(string)
-	if !ok {
-		return ""
-	}
-	return name
+type content interface {
+	marshalMarkdown() string
 }
 
-func getRoomStart(token string, roomId string) string {
-	url := baseUrl + "/rooms/" + roomId + "/messages"
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		log.Fatalf("Failed to retrieve room start: %v", err)
-	}
-	q := req.URL.Query()
-	q.Set("access_token", token)
-	q.Set("dir", "b")
-	q.Set("limit", "1")
-	q.Set("filter", `{"types": ["m.room.create"]}`)
-	req.URL.RawQuery = q.Encode()
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Fatalf("Failed to retrieve room start: %v", err)
-	}
-	defer resp.Body.Close()
-	var respJson map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&respJson)
-	if err != nil {
-		log.Fatalf("Failed to retrieve room start: %v", err)
-	}
-	// We go backward (dir=b) so the start of the messages is in
-	// the "end" field
-	start, ok := respJson["end"].(string)
+type contentParser = func(map[string]interface{}) content
+
+var contentParsers map[string]contentParser = map[string]contentParser{
+	"m.text": textContentParser,
+}
+
+type textContent struct {
+	text string
+}
+
+func (c *textContent) marshalMarkdown() string {
+	return c.text
+}
+
+func textContentParser(m map[string]interface{}) content {
+	text, ok := m["body"].(string)
 	if !ok {
-		log.Fatalf("Failed to retrieve room start, unable to parse response: %v", respJson)
+		log.Fatalf("Failed to parse text message %v", m)
 	}
-	return start
+	return &textContent{text}
 }
 
 type message struct {
-	sender *userInfo
-	date   time.Time
-	text   string
+	sender        *userInfo
+	date          time.Time
+	rawMessage    map[string]interface{}
+	rawContent    map[string]interface{}
+	parsedContent content
 }
 
-func getMessages(token string, roomId string) (messages []*message) {
+type result struct {
+	messages []*message
+	start    string
+	end      string
+}
+
+func getRoomMessages(token string, roomId string, dir string, limit uint64, types []string) result {
 	url := baseUrl + "/rooms/" + roomId + "/messages"
-	from := getRoomStart(token, roomId)
+	switch dir {
+	case "":
+		dir = "b"
+	case "b", "f":
+	default:
+		log.Fatalf("Unknown direction '%s'", dir)
+	}
+	if limit == 0 {
+		limit = 1000
+	}
+	var from string
+	if dir == "f" {
+		from = getRoomStart(token, roomId)
+	}
+	limitStr := strconv.FormatUint(limit, 10)
+	var filterStr string
+	if len(types) != 0 {
+		filter := map[string][]string{
+			"types": types,
+		}
+		tmp, err := json.Marshal(filter)
+		if err != nil {
+			log.Fatalf("Failed to retrieve room messages: %v", err)
+		}
+		filterStr = string(tmp)
+	}
+	messages := make([]*message, 0)
+	var start, end string
 	for {
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
@@ -179,10 +169,14 @@ func getMessages(token string, roomId string) (messages []*message) {
 		}
 		q := req.URL.Query()
 		q.Set("access_token", token)
-		q.Set("dir", "f")
-		q.Set("limit", "1000")
-		q.Set("filter", `{"types": ["m.room.message"]}`)
-		q.Set("from", from)
+		q.Set("dir", dir)
+		q.Set("limit", limitStr)
+		if filterStr != "" {
+			q.Set("filter", filterStr)
+		}
+		if from != "" {
+			q.Set("from", from)
+		}
 		req.URL.RawQuery = q.Encode()
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -203,45 +197,81 @@ func getMessages(token string, roomId string) (messages []*message) {
 			break
 		}
 		for _, chunk := range chunks {
-			msg, ok := chunk.(map[string]interface{})
+			rawMsg, ok := chunk.(map[string]interface{})
 			if !ok {
-				log.Fatalf(errMsg, respJson)
+				log.Fatalf(errMsg, chunk)
 			}
-			ts, ok := msg["origin_server_ts"].(float64)
+			ts, ok := rawMsg["origin_server_ts"].(float64)
 			if !ok {
-				log.Fatalf(errMsg, respJson)
+				log.Fatalf(errMsg, chunk)
 			}
 			ns := math.Mod(ts, 1000) * math.Pow10(6)
 			date := time.Unix(int64(ts/1000), int64(ns))
-			sender, ok := msg["sender"].(string)
+			sender, ok := rawMsg["sender"].(string)
 			if !ok {
-				log.Fatalf(errMsg, respJson)
+				log.Fatalf(errMsg, chunk)
 			}
 			userInfo := getUserInfo(token, sender)
-			content, ok := msg["content"].(map[string]interface{})
+			rawContent, ok := rawMsg["content"].(map[string]interface{})
 			if !ok {
-				log.Fatalf(errMsg, respJson)
+				log.Fatalf(errMsg, chunk)
 			}
-			msgType, ok := content["msgtype"].(string)
-			if !ok {
-				log.Fatalf(errMsg, respJson)
+			var parsedContent content
+			if len(rawContent) != 0 {
+				msgType, ok := rawContent["msgtype"].(string)
+				if ok {
+					parser, ok := contentParsers[msgType]
+					if ok {
+						parsedContent = parser(rawContent)
+					}
+				}
 			}
-			if msgType != "m.text" {
-				continue
+			msg := &message{
+				sender:        userInfo,
+				date:          date,
+				rawMessage:    rawMsg,
+				rawContent:    rawContent,
+				parsedContent: parsedContent,
 			}
-			msgBody, ok := content["body"].(string)
-			if !ok {
-				log.Fatalf(errMsg, respJson)
-			}
-			messages = append(messages, &message{userInfo, date, msgBody})
+			messages = append(messages, msg)
 		}
-		end, ok := respJson["end"].(string)
+		if start == "" {
+			var ok bool
+			start, ok = respJson["start"].(string)
+			if !ok {
+				log.Fatalf(errMsg, respJson)
+			}
+		}
+		end, ok = respJson["end"].(string)
 		if !ok {
 			log.Fatalf(errMsg, respJson)
 		}
 		from = end
 	}
-	return
+	return result{messages, start, end}
+}
+
+func getRoomName(token string, roomId string) string {
+	res := getRoomMessages(token, roomId, "", 1, []string{"m.room.name"})
+	if len(res.messages) == 0 {
+		return ""
+	}
+	message := res.messages[0]
+	name, ok := message.rawContent["name"].(string)
+	if !ok {
+		return ""
+	}
+	return name
+}
+
+func getRoomStart(token string, roomId string) string {
+	res := getRoomMessages(token, roomId, "", 1, []string{"m.room.create"})
+	if len(res.messages) == 0 {
+		log.Fatalf("Failed to retrieve room start")
+	}
+	// We go backward (dir=b) so the start of the messages is in
+	// the "end" field
+	return res.end
 }
 
 type userInfo struct {
@@ -349,14 +379,17 @@ func main() {
 	if room == nil {
 		log.Fatalf("Room '%s' not found", *roomName)
 	}
-	messages := getMessages(token, room.id)
+	res := getRoomMessages(token, room.id, "f", 0, []string{"m.room.message"})
 	var md bytes.Buffer
-	for _, msg := range messages {
+	for _, msg := range res.messages {
+		if msg.parsedContent == nil {
+			continue
+		}
 		mdMsg := fmt.Sprintf("## [%s] %s (%s)\n\n%s\n\n",
 			msg.date.Format("2006-01-02 15:04:05"),
 			msg.sender.name,
 			msg.sender.email,
-			msg.text,
+			msg.parsedContent.marshalMarkdown(),
 		)
 		md.WriteString(mdMsg)
 	}
@@ -367,7 +400,7 @@ func main() {
 		var err error
 		writer, err = os.Create(*output)
 		if err != nil {
-			log.Fatal("Failed to open '%s': %v", *output, err)
+			log.Fatalf("Failed to open '%s': %v", *output, err)
 		}
 	}
 	var outputBytes []byte
@@ -377,10 +410,10 @@ func main() {
 	case "markdown":
 		outputBytes = md.Bytes()
 	default:
-		log.Fatal("Unknown format: %s", *format)
+		log.Fatalf("Unknown format: %s", *format)
 	}
 	_, err := writer.Write(outputBytes)
 	if err != nil {
-		log.Fatal("Failed to write result: %v", err)
+		log.Fatalf("Failed to write result: %v", err)
 	}
 }
