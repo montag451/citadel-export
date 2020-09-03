@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"math"
@@ -287,19 +288,15 @@ func getUserInfo(token string, userId string) *userInfo {
 	return info
 }
 
-func main() {
-	email := flag.String("email", "", "email address")
-	roomName := flag.String("room", "", "room to export")
-	passwordFile := flag.String("password-file", "", "file containing password")
-	format := flag.String("format", "html", "output format (html or markdown)")
-	flag.Parse()
-	if *email == "" || *roomName == "" {
-		log.Println("Missing required argument")
-		flag.Usage()
-		os.Exit(1)
-	}
+func getPassword(passwordFile string) string {
 	var password []byte
-	if *passwordFile == "" {
+	if passwordFile == "" {
+		if !terminal.IsTerminal(syscall.Stdin) {
+			log.Fatal("No password file specified and stdin is not a terminal")
+		}
+		if !terminal.IsTerminal(syscall.Stdout) {
+			log.Fatal("No password file specified and stdout is not a terminal, use -output")
+		}
 		fmt.Print("Password: ")
 		var err error
 		password, err = terminal.ReadPassword(syscall.Stdin)
@@ -308,11 +305,11 @@ func main() {
 		}
 		fmt.Println()
 	} else {
-		f, err := os.Open(*passwordFile)
+		f, err := os.Open(passwordFile)
 		if err != nil {
 			log.Fatalf(
 				"Failed to open password file '%s': %v",
-				*passwordFile,
+				passwordFile,
 				err,
 			)
 		}
@@ -320,12 +317,28 @@ func main() {
 		if err != nil {
 			log.Fatalf(
 				"Failed to read password file '%s': %v",
-				*passwordFile,
+				passwordFile,
 				err,
 			)
 		}
 	}
-	token := getAccessToken(*email, string(password))
+	return string(password)
+}
+
+func main() {
+	email := flag.String("email", "", "email address")
+	roomName := flag.String("room", "", "room to export")
+	passwordFile := flag.String("password-file", "", "file containing password")
+	format := flag.String("format", "html", "output format (html or markdown)")
+	output := flag.String("output", "", "output file")
+	flag.Parse()
+	if *email == "" || *roomName == "" {
+		log.Println("Missing required argument")
+		flag.Usage()
+		os.Exit(1)
+	}
+	password := getPassword(*passwordFile)
+	token := getAccessToken(*email, password)
 	rooms := getRooms(token)
 	var room *room
 	for _, r := range rooms {
@@ -347,12 +360,27 @@ func main() {
 		)
 		md.WriteString(mdMsg)
 	}
+	var writer io.Writer
+	if *output == "" {
+		writer = os.Stdout
+	} else {
+		var err error
+		writer, err = os.Create(*output)
+		if err != nil {
+			log.Fatal("Failed to open '%s': %v", *output, err)
+		}
+	}
+	var outputBytes []byte
 	switch *format {
 	case "html":
-		fmt.Print(string(markdown.ToHTML(md.Bytes(), nil, nil)))
+		outputBytes = markdown.ToHTML(md.Bytes(), nil, nil)
 	case "markdown":
-		fmt.Print(md.String())
+		outputBytes = md.Bytes()
 	default:
 		log.Fatal("Unknown format: %s", *format)
+	}
+	_, err := writer.Write(outputBytes)
+	if err != nil {
+		log.Fatal("Failed to write result: %v", err)
 	}
 }
