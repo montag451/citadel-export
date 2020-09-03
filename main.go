@@ -10,6 +10,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"syscall"
@@ -20,7 +21,10 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 )
 
-const baseUrl = "https://thales.citadel.team/_matrix/client/r0"
+const (
+	baseUrl      = "https://thales.citadel.team/_matrix/client/r0"
+	baseMediaUrl = "https://thales.citadel.team/_matrix/media/r0"
+)
 
 func getAccessToken(email string, password string) string {
 	userInfo := map[string]interface{}{
@@ -99,7 +103,8 @@ type content interface {
 type contentParser = func(map[string]interface{}) content
 
 var contentParsers map[string]contentParser = map[string]contentParser{
-	"m.text": textContentParser,
+	"m.text":  textContentParser,
+	"m.image": imageContentParser,
 }
 
 type textContent struct {
@@ -116,6 +121,32 @@ func textContentParser(m map[string]interface{}) content {
 		log.Fatalf("Failed to parse text message %v", m)
 	}
 	return &textContent{text}
+}
+
+type imageContent struct {
+	name string
+	url  string
+}
+
+func (c *imageContent) marshalMarkdown() string {
+	u, err := url.Parse(c.url)
+	if err != nil {
+		log.Fatalf("Failed to marshal image message %#v", c)
+	}
+	downloadUrl := baseMediaUrl + "/download/" + u.Host + u.Path
+	return fmt.Sprintf("![%s](%s)", c.name, downloadUrl)
+}
+
+func imageContentParser(m map[string]interface{}) content {
+	name, ok := m["body"].(string)
+	if !ok {
+		log.Fatalf("Failed to parse text message %v", m)
+	}
+	url, ok := m["url"].(string)
+	if !ok {
+		log.Fatalf("Failed to parse text message %v", m)
+	}
+	return &imageContent{name, url}
 }
 
 type message struct {
