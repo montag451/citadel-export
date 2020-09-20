@@ -12,7 +12,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
+	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -88,16 +91,17 @@ func getRooms(token string) []*room {
 	if !ok {
 		log.Fatalf("Failed to retrieve rooms, unable to parse response: %v", respJson)
 	}
-	rooms := make([]*room, len(joinedRooms))
-	for i, roomId := range joinedRooms {
+	rooms := make([]*room, 0, len(joinedRooms))
+	for _, roomId := range joinedRooms {
 		name := getRoomName(token, roomId)
-		rooms[i] = &room{id: roomId, name: name}
+		rooms = append(rooms, &room{id: roomId, name: name})
 	}
 	return rooms
 }
 
 type content interface {
-	marshalMarkdown() string
+	marshalMarkdown(downloadDir string) string
+	downloadURL() *url.URL
 }
 
 type contentParser = func(map[string]interface{}) content
@@ -105,14 +109,19 @@ type contentParser = func(map[string]interface{}) content
 var contentParsers map[string]contentParser = map[string]contentParser{
 	"m.text":  textContentParser,
 	"m.image": imageContentParser,
+	"m.file":  fileContentParser,
 }
 
 type textContent struct {
 	text string
 }
 
-func (c *textContent) marshalMarkdown() string {
+func (c *textContent) marshalMarkdown(string) string {
 	return c.text
+}
+
+func (*textContent) downloadURL() *url.URL {
+	return nil
 }
 
 func textContentParser(m map[string]interface{}) content {
@@ -125,28 +134,69 @@ func textContentParser(m map[string]interface{}) content {
 
 type imageContent struct {
 	name string
-	url  string
+	url  *url.URL
 }
 
-func (c *imageContent) marshalMarkdown() string {
-	u, err := url.Parse(c.url)
+func (c *imageContent) marshalMarkdown(downloadDir string) string {
+	src := filepath.Join(downloadDir, c.url.Path)
+	return fmt.Sprintf(`<img src="%s" alt="%s" style="max-width:100%%;height:auto"/>`, src, c.name)
+}
+
+func (c *imageContent) downloadURL() *url.URL {
+	u, err := url.Parse(baseMediaUrl + "/download/" + c.url.Host + c.url.Path)
 	if err != nil {
-		log.Fatalf("Failed to marshal image message %#v", c)
+		log.Fatalf("Failed to generate download URL")
 	}
-	downloadUrl := baseMediaUrl + "/download/" + u.Host + u.Path
-	return fmt.Sprintf("![%s](%s)", c.name, downloadUrl)
+	return u
 }
 
 func imageContentParser(m map[string]interface{}) content {
 	name, ok := m["body"].(string)
 	if !ok {
-		log.Fatalf("Failed to parse text message %v", m)
+		log.Fatalf("Failed to parse image message %v", m)
 	}
-	url, ok := m["url"].(string)
+	urlStr, ok := m["url"].(string)
 	if !ok {
-		log.Fatalf("Failed to parse text message %v", m)
+		log.Fatalf("Failed to parse image message %v", m)
 	}
-	return &imageContent{name, url}
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		log.Fatalf("Failed to parse image message %v", m)
+	}
+	return &imageContent{name, u}
+}
+
+type fileContent struct {
+	name string
+	url  *url.URL
+}
+
+func (c *fileContent) marshalMarkdown(downloadDir string) string {
+	return fmt.Sprintf("[%s](%s)", c.name, filepath.Join(downloadDir, c.url.Path))
+}
+
+func (c *fileContent) downloadURL() *url.URL {
+	u, err := url.Parse(baseMediaUrl + "/download/" + c.url.Host + c.url.Path)
+	if err != nil {
+		log.Fatalf("Failed to generate download URL")
+	}
+	return u
+}
+
+func fileContentParser(m map[string]interface{}) content {
+	name, ok := m["body"].(string)
+	if !ok {
+		log.Fatalf("Failed to parse file message %v", m)
+	}
+	urlStr, ok := m["url"].(string)
+	if !ok {
+		log.Fatalf("Failed to parse file message %v", m)
+	}
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		log.Fatalf("Failed to parse file message %v", m)
+	}
+	return &fileContent{name, u}
 }
 
 type message struct {
@@ -349,6 +399,30 @@ func getUserInfo(token string, userId string) *userInfo {
 	return info
 }
 
+func downloadFile(token string, u *url.URL, downloadDir string) {
+	fileName := filepath.Join(downloadDir, path.Base(u.Path))
+	f, err := os.Create(fileName)
+	if err != nil {
+		log.Fatalf("Failed to create file %q", fileName)
+	}
+	defer f.Close()
+	req, err := http.NewRequest("GET", u.String(), nil)
+	if err != nil {
+		log.Fatalf("Failed to download %q: %v", fileName, err)
+	}
+	q := req.URL.Query()
+	q.Set("access_token", token)
+	req.URL.RawQuery = q.Encode()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Fatalf("Failed to download %q: %v", fileName, err)
+	}
+	defer resp.Body.Close()
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		log.Fatalf("Failed to download %q: %v", fileName, err)
+	}
+}
+
 func getPassword(passwordFile string) string {
 	var password []byte
 	if passwordFile == "" {
@@ -391,9 +465,9 @@ func main() {
 	roomName := flag.String("room", "", "room to export")
 	passwordFile := flag.String("password-file", "", "file containing password")
 	format := flag.String("format", "html", "output format (html or markdown)")
-	output := flag.String("output", "", "output file")
+	outputDir := flag.String("output-dir", "", "output directory")
 	flag.Parse()
-	if *email == "" || *roomName == "" {
+	if *email == "" || *roomName == "" || *outputDir == "" {
 		log.Println("Missing required argument")
 		flag.Usage()
 		os.Exit(1)
@@ -411,6 +485,11 @@ func main() {
 		log.Fatalf("Room '%s' not found", *roomName)
 	}
 	res := getRoomMessages(token, room.id, "f", 0, []string{"m.room.message"})
+	downloadDir := filepath.Join(*outputDir, "files")
+	if err := os.MkdirAll(downloadDir, 0755); err != nil {
+		log.Fatal("Failed to create download dir")
+	}
+	var wg sync.WaitGroup
 	var md bytes.Buffer
 	for _, msg := range res.messages {
 		if msg.parsedContent == nil {
@@ -420,31 +499,37 @@ func main() {
 			msg.date.Format("2006-01-02 15:04:05"),
 			msg.sender.name,
 			msg.sender.email,
-			msg.parsedContent.marshalMarkdown(),
+			msg.parsedContent.marshalMarkdown(downloadDir),
 		)
+		if url := msg.parsedContent.downloadURL(); url != nil {
+			go func() {
+				wg.Add(1)
+				defer wg.Done()
+				downloadFile(token, url, downloadDir)
+			}()
+		}
 		md.WriteString(mdMsg)
 	}
-	var writer io.Writer
-	if *output == "" {
-		writer = os.Stdout
-	} else {
-		var err error
-		writer, err = os.Create(*output)
-		if err != nil {
-			log.Fatalf("Failed to open '%s': %v", *output, err)
-		}
-	}
-	var outputBytes []byte
+	wg.Wait()
+	var (
+		outputFileName string
+		outputBytes    []byte
+	)
 	switch *format {
 	case "html":
 		outputBytes = markdown.ToHTML(md.Bytes(), nil, nil)
+		outputFileName = filepath.Join(*outputDir, "messages.html")
 	case "markdown":
 		outputBytes = md.Bytes()
+		outputFileName = filepath.Join(*outputDir, "messages.md")
 	default:
 		log.Fatalf("Unknown format: %s", *format)
 	}
-	_, err := writer.Write(outputBytes)
+	output, err := os.Create(outputFileName)
 	if err != nil {
-		log.Fatalf("Failed to write result: %v", err)
+		log.Fatalf("Failed to create output file %q: %v", outputFileName, err)
+	}
+	if _, err := output.Write(outputBytes); err != nil {
+		log.Fatalf("Failed to write output: %v", err)
 	}
 }
