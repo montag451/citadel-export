@@ -541,6 +541,7 @@ func main() {
 		}
 	}
 	var wg sync.WaitGroup
+	wg.Add(len(infos))
 	nbWorkers := 20
 	ch := make(chan *fileInfo, nbWorkers)
 	bar := pb.StartNew(len(infos))
@@ -548,7 +549,6 @@ func main() {
 	for i := 0; i < nbWorkers; i++ {
 		go func() {
 			for info := range ch {
-				wg.Add(1)
 				downloadFile(token, info, downloadDir)
 				bar.Increment()
 				wg.Done()
