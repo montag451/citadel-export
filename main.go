@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cheggaaa/pb"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
@@ -529,19 +530,34 @@ func main() {
 	if err := tmpl.Execute(output, res.messages); err != nil {
 		log.Fatalf("Failed to write output: %v", err)
 	}
-	var wg sync.WaitGroup
+	var infos []*fileInfo
 	for _, msg := range res.messages {
 		content := msg.ParsedContent
 		if content == nil {
 			continue
 		}
 		if info := content.fileInfo(); info != nil {
-			go func() {
-				wg.Add(1)
-				defer wg.Done()
-				downloadFile(token, info, downloadDir)
-			}()
+			infos = append(infos, info)
 		}
+	}
+	var wg sync.WaitGroup
+	nbWorkers := 20
+	ch := make(chan *fileInfo, nbWorkers)
+	bar := pb.StartNew(len(infos))
+	defer bar.Finish()
+	for i := 0; i < nbWorkers; i++ {
+		go func() {
+			for info := range ch {
+				wg.Add(1)
+				downloadFile(token, info, downloadDir)
+				bar.Increment()
+				wg.Done()
+			}
+		}()
+	}
+	log.Println("Downloading files...")
+	for _, info := range infos {
+		ch <- info
 	}
 	wg.Wait()
 }
