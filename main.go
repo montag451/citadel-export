@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"html"
@@ -17,7 +18,6 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
-	"sync"
 	"syscall"
 	"time"
 
@@ -433,28 +433,49 @@ func getUserInfo(token string, userId string) *userInfo {
 	return info
 }
 
-func downloadFile(token string, info *fileInfo, downloadDir string) {
+func downloadFile(token string, info *fileInfo, downloadDir string) (err error) {
 	fileName := filepath.Join(downloadDir, info.uniqueName)
-	f, err := os.Create(fileName)
+	f, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 	if err != nil {
-		log.Fatalf("Failed to create file %q", fileName)
+		if errors.Is(err, os.ErrExist) {
+			err = nil
+			return
+		}
+		err = fmt.Errorf("Failed to create file %q: %w", fileName, err)
+		return
 	}
-	defer f.Close()
+	defer func() {
+		f.Close()
+		if err != nil {
+			if err := os.Remove(fileName); err != nil {
+				errMsg := fmt.Sprintf("Failed to remove %q", fileName)
+				panic(errMsg)
+			}
+		}
+	}()
 	req, err := http.NewRequest("GET", info.url, nil)
 	if err != nil {
-		log.Fatalf("Failed to download %q: %v", fileName, err)
+		err = fmt.Errorf("Failed to download %q: %w", fileName, err)
+		return
 	}
 	q := req.URL.Query()
 	q.Set("access_token", token)
 	req.URL.RawQuery = q.Encode()
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Fatalf("Failed to download %q: %v", fileName, err)
+		err = fmt.Errorf("Failed to download %q: %w", fileName, err)
+		return
 	}
 	defer resp.Body.Close()
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		log.Fatalf("Failed to download %q: %v", fileName, err)
+	if resp.StatusCode != 200 {
+		err = fmt.Errorf("Failed to download %q, unexpected HTTP code: %d", fileName, resp.StatusCode)
+		return
 	}
+	if _, err = io.Copy(f, resp.Body); err != nil {
+		err = fmt.Errorf("Failed to download %q: %w", fileName, err)
+		return
+	}
+	return
 }
 
 func getPassword(passwordFile string) string {
@@ -540,24 +561,48 @@ func main() {
 			infos = append(infos, info)
 		}
 	}
-	var wg sync.WaitGroup
-	wg.Add(len(infos))
 	nbWorkers := 20
-	ch := make(chan *fileInfo, nbWorkers)
+	done := make(chan struct{}, nbWorkers)
+	infoChan := make(chan *fileInfo, nbWorkers)
+	errChan := make(chan error)
 	bar := pb.StartNew(len(infos))
-	defer bar.Finish()
 	for i := 0; i < nbWorkers; i++ {
 		go func() {
-			for info := range ch {
-				downloadFile(token, info, downloadDir)
+			defer func() {
+				done <- struct{}{}
+			}()
+			for info := range infoChan {
+				errChan <- downloadFile(token, info, downloadDir)
 				bar.Increment()
-				wg.Done()
 			}
 		}()
 	}
 	log.Println("Downloading files...")
+	errors := make([]error, 0, len(infos))
 	for _, info := range infos {
-		ch <- info
+	selectLoop:
+		for {
+			select {
+			case infoChan <- info:
+				break selectLoop
+			case err := <-errChan:
+				errors = append(errors, err)
+			}
+		}
 	}
-	wg.Wait()
+	close(infoChan)
+	for i := 0; i < nbWorkers; {
+		select {
+		case err := <-errChan:
+			errors = append(errors, err)
+		case <-done:
+			i++
+		}
+	}
+	bar.Finish()
+	for _, err := range errors {
+		if err != nil {
+			log.Println(err)
+		}
+	}
 }
