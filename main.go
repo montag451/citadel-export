@@ -586,7 +586,9 @@ func main() {
 			case infoChan <- info:
 				break selectLoop
 			case err := <-errChan:
-				errors = append(errors, err)
+				if err != nil {
+					errors = append(errors, err)
+				}
 			}
 		}
 	}
@@ -594,15 +596,15 @@ func main() {
 	for i := 0; i < nbWorkers; {
 		select {
 		case err := <-errChan:
-			errors = append(errors, err)
+			if err != nil {
+				errors = append(errors, err)
+			}
 		case <-done:
 			i++
 		}
 	}
 	bar.Finish()
 	for _, err := range errors {
-		if err != nil {
-			log.Println(err)
-		}
+		log.Println(err)
 	}
 }
