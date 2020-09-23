@@ -606,21 +606,13 @@ func downloadFiles(token string, infos []*fileInfo, downloadDir string) []error 
 			}
 		}()
 	}
-	errors := make([]error, 0, len(infos))
-	for _, info := range infos {
-	selectLoop:
-		for {
-			select {
-			case infoChan <- info:
-				break selectLoop
-			case err := <-errChan:
-				if err != nil {
-					errors = append(errors, err)
-				}
-			}
+	go func() {
+		defer close(infoChan)
+		for _, info := range infos {
+			infoChan <- info
 		}
-	}
-	close(infoChan)
+	}()
+	errors := make([]error, 0, len(infos))
 	for i := 0; i < nbWorkers; {
 		select {
 		case err := <-errChan:
