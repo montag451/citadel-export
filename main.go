@@ -267,8 +267,9 @@ func imageContentParser(m map[string]interface{}) (content, error) {
 }
 
 type fileContent struct {
-	name string
-	url  *url.URL
+	name     string
+	url      *url.URL
+	mimeType string
 }
 
 func (c *fileContent) fileInfo() *fileInfo {
@@ -281,7 +282,7 @@ func (c *fileContent) fileInfo() *fileInfo {
 
 func (c *fileContent) MarshalHTML() template.HTML {
 	href := path.Join(contentDir, c.url.Path)
-	return template.HTML(fmt.Sprintf(`<p><a href="%s">%s</a></p>`, href, c.name))
+	return template.HTML(fmt.Sprintf(`<p><a href="%s" type="%s">%s</a></p>`, href, c.mimeType, c.name))
 }
 
 func fileContentParser(m map[string]interface{}) (content, error) {
@@ -298,7 +299,11 @@ func fileContentParser(m map[string]interface{}) (content, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse file URL %q: %w", urlStr, err)
 	}
-	return &fileContent{name, u}, nil
+	var mimeType string
+	if info, ok := m["info"].(map[string]interface{}); ok {
+		mimeType, _ = info["mimetype"].(string)
+	}
+	return &fileContent{name, u, mimeType}, nil
 }
 
 type message struct {
