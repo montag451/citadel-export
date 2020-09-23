@@ -294,7 +294,7 @@ type result struct {
 	end      string
 }
 
-func getRoomMessages(token string, roomId string, dir string, limit uint64, types []string) (*result, error) {
+func getRoomMessages(token string, roomId string, dir string, types []string) (*result, error) {
 	switch dir {
 	case "":
 		dir = "b"
@@ -302,9 +302,6 @@ func getRoomMessages(token string, roomId string, dir string, limit uint64, type
 	default:
 		err := fmt.Errorf("unknown direction %q", dir)
 		panic(err)
-	}
-	if limit == 0 {
-		limit = 1000
 	}
 	var from string
 	if dir == "f" {
@@ -314,7 +311,7 @@ func getRoomMessages(token string, roomId string, dir string, limit uint64, type
 			return nil, err
 		}
 	}
-	limitStr := strconv.FormatUint(limit, 10)
+	limit := strconv.FormatUint(1000, 10)
 	var filterStr string
 	if len(types) != 0 {
 		filter := map[string][]string{
@@ -331,7 +328,7 @@ func getRoomMessages(token string, roomId string, dir string, limit uint64, type
 	for {
 		q := url.Values{}
 		q.Set("dir", dir)
-		q.Set("limit", limitStr)
+		q.Set("limit", limit)
 		if filterStr != "" {
 			q.Set("filter", filterStr)
 		}
@@ -416,7 +413,7 @@ func getRoomMessages(token string, roomId string, dir string, limit uint64, type
 }
 
 func getRoomName(token string, roomId string) (string, error) {
-	res, err := getRoomMessages(token, roomId, "", 1, []string{"m.room.name"})
+	res, err := getRoomMessages(token, roomId, "", []string{"m.room.name"})
 	if err != nil {
 		return "", err
 	}
@@ -433,7 +430,7 @@ func getRoomName(token string, roomId string) (string, error) {
 
 func getRoomStart(token string, roomId string) (string, error) {
 	t := "m.room.create"
-	res, err := getRoomMessages(token, roomId, "", 1, []string{t})
+	res, err := getRoomMessages(token, roomId, "", []string{t})
 	if err != nil {
 		return "", err
 	}
@@ -575,7 +572,7 @@ func main() {
 	if room == nil {
 		log.Fatalf("Room '%s' not found", *roomName)
 	}
-	res, err := getRoomMessages(token, room.id, "f", 0, []string{"m.room.message"})
+	res, err := getRoomMessages(token, room.id, "f", []string{"m.room.message"})
 	if err != nil {
 		log.Fatal(err)
 	}
