@@ -638,21 +638,23 @@ func main() {
 	outputDir := flag.String("output-dir", "", "output directory")
 	flag.Parse()
 	if *email == "" || *roomName == "" || *outputDir == "" {
-		log.Println("missing required argument")
+		log.Println("Missing required argument")
 		flag.Usage()
 		os.Exit(1)
 	}
 	password, err := getPassword(*passwordFile)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Failed to get password: ", err)
 	}
+	log.Println("Getting access token...")
 	token, err := getAccessToken(*email, password)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Failed to get access token: ", err)
 	}
+	log.Println("Getting available rooms...")
 	rooms, err := getRooms(token)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Failed to get available rooms: ", err)
 	}
 	var room *room
 	for _, r := range rooms {
@@ -661,23 +663,24 @@ func main() {
 		}
 	}
 	if room == nil {
-		log.Fatalf("room '%s' not found", *roomName)
+		log.Fatalf("Room %q not found", *roomName)
 	}
+	log.Println("Fetching room messages...")
 	res, err := getRoomMessages(token, room.id, "f", []string{"m.room.message"})
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Failed to fetch messages: ", err)
 	}
 	downloadDir := filepath.Join(*outputDir, contentDir)
 	if err := os.MkdirAll(downloadDir, 0755); err != nil {
-		log.Fatal("failed to create download dir")
+		log.Fatalf("Failed to create download dir %q", downloadDir)
 	}
 	outputFileName := filepath.Join(*outputDir, "messages.html")
 	output, err := os.Create(outputFileName)
 	if err != nil {
-		log.Fatalf("failed to create output file %q: %v", outputFileName, err)
+		log.Fatalf("Failed to create output file %q: %v", outputFileName, err)
 	}
 	if err := tmpl.Execute(output, res.messages); err != nil {
-		log.Fatalf("failed to write output: %v", err)
+		log.Fatalf("Failed to render output file %q: %v", outputFileName, err)
 	}
 	var infos []*fileInfo
 	for _, msg := range res.messages {
@@ -690,9 +693,10 @@ func main() {
 		}
 	}
 	if len(infos) > 0 {
-		log.Println("downloading files...")
+		log.Println("Downloading files...")
 		for _, err := range downloadFiles(token, infos, downloadDir) {
 			log.Println(err)
 		}
 	}
+	log.Printf("Room %q has been successfully exported to %q\n", *roomName, *outputDir)
 }
