@@ -44,7 +44,52 @@ var tmpl *template.Template = template.Must(template.New("").Parse(`
   </body>
 </html>`))
 
-func getAccessToken(email string, password string) string {
+func parseMatrixError(r io.Reader) (code string, message string, err error) {
+	var resp struct {
+		Errcode string `json:"errcode"`
+		Error   string `json:"error"`
+	}
+	if err = json.NewDecoder(r).Decode(&resp); err != nil {
+		return
+	}
+	if resp.Errcode == "" {
+		// If errcode is empty or absent, assume failure to
+		// parse response
+		err = errors.New("unable to parse response, empty or missing errcode")
+		return
+	}
+	code, message, err = resp.Errcode, resp.Error, nil
+	return
+}
+
+func request(token string, url string, params url.Values) (*http.Response, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to make request to %q: %w", url, err)
+	}
+	q := req.URL.Query()
+	q.Set("access_token", token)
+	for key, values := range params {
+		for _, value := range values {
+			q.Add(key, value)
+		}
+	}
+	req.URL.RawQuery = q.Encode()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to make request to %q: %w", url, err)
+	}
+	if resp.StatusCode != 200 {
+		_, msg, err := parseMatrixError(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to make request to %q, unexpected HTTP code: %d", url, resp.StatusCode)
+		}
+		return nil, fmt.Errorf("failed to make request to %q: %s", url, msg)
+	}
+	return resp, nil
+}
+
+func getAccessToken(email string, password string) (string, error) {
 	userInfo := map[string]interface{}{
 		"type": "m.login.password",
 		"identifier": map[string]string{
@@ -56,27 +101,31 @@ func getAccessToken(email string, password string) string {
 	}
 	body, err := json.Marshal(&userInfo)
 	if err != nil {
-		log.Fatalf("Unable to get token: %v", err)
+		return "", fmt.Errorf("unable to get token: %w", err)
 	}
 	bodyReader := bytes.NewReader(body)
 	resp, err := http.Post(baseUrl+"/login", "application/json", bodyReader)
 	if err != nil {
-		log.Fatalf("Unable to get token: %v", err)
+		return "", fmt.Errorf("unable to get token: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		_, msg, err := parseMatrixError(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("unable to get token, unexpected HTTP code: %d", resp.StatusCode)
+		}
+		return "", fmt.Errorf("unable to get token: %s", msg)
+	}
 	var loginResp map[string]string
 	err = json.NewDecoder(resp.Body).Decode(&loginResp)
 	if err != nil {
-		log.Fatalf("Unable to get token: %v", err)
+		return "", fmt.Errorf("unable to get token: %w", err)
 	}
 	token, ok := loginResp["access_token"]
 	if !ok {
-		log.Fatalf(
-			"Unable to get token, missing token in response: %v",
-			loginResp,
-		)
+		return "", fmt.Errorf("unable to get token, missing token in response: %v", loginResp)
 	}
-	return token
+	return token, nil
 }
 
 type room struct {
@@ -84,34 +133,30 @@ type room struct {
 	name string
 }
 
-func getRooms(token string) []*room {
-	req, err := http.NewRequest("GET", baseUrl+"/joined_rooms", nil)
+func getRooms(token string) ([]*room, error) {
+	resp, err := request(token, baseUrl+"/joined_rooms", nil)
 	if err != nil {
-		log.Fatalf("Failed to retrieve rooms: %v", err)
-	}
-	q := req.URL.Query()
-	q.Set("access_token", token)
-	req.URL.RawQuery = q.Encode()
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Fatalf("Failed to retrieve rooms: %v", err)
+		return nil, fmt.Errorf("failed to retrieve rooms: %w", err)
 	}
 	defer resp.Body.Close()
 	var respJson map[string][]string
 	err = json.NewDecoder(resp.Body).Decode(&respJson)
 	if err != nil {
-		log.Fatalf("Failed to retrieve rooms: %v", err)
+		return nil, fmt.Errorf("failed to retrieve rooms: %w", err)
 	}
 	joinedRooms, ok := respJson["joined_rooms"]
 	if !ok {
-		log.Fatalf("Failed to retrieve rooms, unable to parse response: %v", respJson)
+		return nil, fmt.Errorf("failed to retrieve rooms, unable to parse response: %v", respJson)
 	}
 	rooms := make([]*room, 0, len(joinedRooms))
 	for _, roomId := range joinedRooms {
-		name := getRoomName(token, roomId)
+		name, err := getRoomName(token, roomId)
+		if err != nil {
+			return nil, err
+		}
 		rooms = append(rooms, &room{id: roomId, name: name})
 	}
-	return rooms
+	return rooms, nil
 }
 
 type fileInfo struct {
@@ -125,7 +170,7 @@ type content interface {
 	MarshalHTML() template.HTML
 }
 
-type contentParser = func(map[string]interface{}) content
+type contentParser = func(map[string]interface{}) (content, error)
 
 var contentParsers map[string]contentParser = map[string]contentParser{
 	"m.text":  textContentParser,
@@ -152,16 +197,16 @@ func (c *textContent) MarshalHTML() template.HTML {
 	return template.HTML(h)
 }
 
-func textContentParser(m map[string]interface{}) content {
+func textContentParser(m map[string]interface{}) (content, error) {
 	text, ok := m["body"].(string)
 	if !ok {
-		log.Fatalf("Failed to parse text message %v", m)
+		return nil, fmt.Errorf("failed to parse text message, missing %q", "body")
 	}
 	var html string
 	if format, ok := m["format"].(string); ok && format == "org.matrix.custom.html" {
 		html, _ = m["formatted_body"].(string)
 	}
-	return &textContent{text, html}
+	return &textContent{text, html}, nil
 }
 
 type imageContent struct {
@@ -183,20 +228,21 @@ func (c *imageContent) MarshalHTML() template.HTML {
 	return template.HTML(fmt.Sprintf(imgFmt, src, c.name))
 }
 
-func imageContentParser(m map[string]interface{}) content {
+func imageContentParser(m map[string]interface{}) (content, error) {
+	errMsg := "failed to parse image message, missing %q"
 	name, ok := m["body"].(string)
 	if !ok {
-		log.Fatalf("Failed to parse image message %v", m)
+		return nil, fmt.Errorf(errMsg, "body")
 	}
 	urlStr, ok := m["url"].(string)
 	if !ok {
-		log.Fatalf("Failed to parse image message %v", m)
+		return nil, fmt.Errorf(errMsg, "url")
 	}
 	u, err := url.Parse(urlStr)
 	if err != nil {
-		log.Fatalf("Failed to parse image message %v", m)
+		return nil, fmt.Errorf("failed to parse image URL %q: %w", urlStr, err)
 	}
-	return &imageContent{name, u}
+	return &imageContent{name, u}, nil
 }
 
 type fileContent struct {
@@ -217,20 +263,21 @@ func (c *fileContent) MarshalHTML() template.HTML {
 	return template.HTML(fmt.Sprintf(`<p><a href="%s">%s</a></p>`, href, c.name))
 }
 
-func fileContentParser(m map[string]interface{}) content {
+func fileContentParser(m map[string]interface{}) (content, error) {
+	errMsg := "failed to parse file message, missing %q"
 	name, ok := m["body"].(string)
 	if !ok {
-		log.Fatalf("Failed to parse file message %v", m)
+		return nil, fmt.Errorf(errMsg, "body")
 	}
 	urlStr, ok := m["url"].(string)
 	if !ok {
-		log.Fatalf("Failed to parse file message %v", m)
+		return nil, fmt.Errorf(errMsg, "url")
 	}
 	u, err := url.Parse(urlStr)
 	if err != nil {
-		log.Fatalf("Failed to parse file message %v", m)
+		return nil, fmt.Errorf("failed to parse file URL %q: %w", urlStr, err)
 	}
-	return &fileContent{name, u}
+	return &fileContent{name, u}, nil
 }
 
 type message struct {
@@ -247,21 +294,25 @@ type result struct {
 	end      string
 }
 
-func getRoomMessages(token string, roomId string, dir string, limit uint64, types []string) result {
-	url := baseUrl + "/rooms/" + roomId + "/messages"
+func getRoomMessages(token string, roomId string, dir string, limit uint64, types []string) (*result, error) {
 	switch dir {
 	case "":
 		dir = "b"
 	case "b", "f":
 	default:
-		log.Fatalf("Unknown direction '%s'", dir)
+		err := fmt.Errorf("unknown direction %q", dir)
+		panic(err)
 	}
 	if limit == 0 {
 		limit = 1000
 	}
 	var from string
 	if dir == "f" {
-		from = getRoomStart(token, roomId)
+		var err error
+		from, err = getRoomStart(token, roomId)
+		if err != nil {
+			return nil, err
+		}
 	}
 	limitStr := strconv.FormatUint(limit, 10)
 	var filterStr string
@@ -271,19 +322,14 @@ func getRoomMessages(token string, roomId string, dir string, limit uint64, type
 		}
 		tmp, err := json.Marshal(filter)
 		if err != nil {
-			log.Fatalf("Failed to retrieve room messages: %v", err)
+			return nil, fmt.Errorf("failed to retrieve room messages: %w", err)
 		}
 		filterStr = string(tmp)
 	}
 	messages := make([]*message, 0)
 	var start, end string
 	for {
-		req, err := http.NewRequest("GET", url, nil)
-		if err != nil {
-			log.Fatalf("Failed to retrieve room messages: %v", err)
-		}
-		q := req.URL.Query()
-		q.Set("access_token", token)
+		q := url.Values{}
 		q.Set("dir", dir)
 		q.Set("limit", limitStr)
 		if filterStr != "" {
@@ -292,21 +338,20 @@ func getRoomMessages(token string, roomId string, dir string, limit uint64, type
 		if from != "" {
 			q.Set("from", from)
 		}
-		req.URL.RawQuery = q.Encode()
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := request(token, baseUrl+"/rooms/"+roomId+"/messages", q)
 		if err != nil {
-			log.Fatalf("Failed to retrieve room messages: %v", err)
+			return nil, fmt.Errorf("failed to retrieve room messages: %w", err)
 		}
 		defer resp.Body.Close()
 		var respJson map[string]interface{}
 		err = json.NewDecoder(resp.Body).Decode(&respJson)
 		if err != nil {
-			log.Fatalf("Failed to retrieve room messages: %v", err)
+			return nil, fmt.Errorf("failed to retrieve room messages: %w", err)
 		}
-		errMsg := "Failed to retrieve room messages, unable to parse response: %v"
+		errMsg := "failed to retrieve room messages, unable to parse response: %v"
 		chunks, ok := respJson["chunk"].([]interface{})
 		if !ok {
-			log.Fatalf(errMsg, respJson)
+			return nil, fmt.Errorf(errMsg, respJson)
 		}
 		if len(chunks) == 0 {
 			break
@@ -314,30 +359,34 @@ func getRoomMessages(token string, roomId string, dir string, limit uint64, type
 		for _, chunk := range chunks {
 			rawMsg, ok := chunk.(map[string]interface{})
 			if !ok {
-				log.Fatalf(errMsg, chunk)
+				return nil, fmt.Errorf(errMsg, respJson)
 			}
 			ts, ok := rawMsg["origin_server_ts"].(float64)
 			if !ok {
-				log.Fatalf(errMsg, chunk)
+				return nil, fmt.Errorf(errMsg, respJson)
 			}
 			ns := math.Mod(ts, 1000) * math.Pow10(6)
 			date := time.Unix(int64(ts/1000), int64(ns))
 			sender, ok := rawMsg["sender"].(string)
 			if !ok {
-				log.Fatalf(errMsg, chunk)
+				return nil, fmt.Errorf(errMsg, respJson)
 			}
-			userInfo := getUserInfo(token, sender)
+			userInfo, err := getUserInfo(token, sender)
+			if err != nil {
+				return nil, err
+			}
 			rawContent, ok := rawMsg["content"].(map[string]interface{})
 			if !ok {
-				log.Fatalf(errMsg, chunk)
+				return nil, fmt.Errorf(errMsg, respJson)
 			}
 			var parsedContent content
 			if len(rawContent) != 0 {
-				msgType, ok := rawContent["msgtype"].(string)
-				if ok {
-					parser, ok := contentParsers[msgType]
-					if ok {
-						parsedContent = parser(rawContent)
+				if msgType, ok := rawContent["msgtype"].(string); ok {
+					if parser, ok := contentParsers[msgType]; ok {
+						parsedContent, err = parser(rawContent)
+						if err != nil {
+							return nil, err
+						}
 					}
 				}
 			}
@@ -354,39 +403,46 @@ func getRoomMessages(token string, roomId string, dir string, limit uint64, type
 			var ok bool
 			start, ok = respJson["start"].(string)
 			if !ok {
-				log.Fatalf(errMsg, respJson)
+				return nil, fmt.Errorf(errMsg, respJson)
 			}
 		}
 		end, ok = respJson["end"].(string)
 		if !ok {
-			log.Fatalf(errMsg, respJson)
+			return nil, fmt.Errorf(errMsg, respJson)
 		}
 		from = end
 	}
-	return result{messages, start, end}
+	return &result{messages, start, end}, nil
 }
 
-func getRoomName(token string, roomId string) string {
-	res := getRoomMessages(token, roomId, "", 1, []string{"m.room.name"})
+func getRoomName(token string, roomId string) (string, error) {
+	res, err := getRoomMessages(token, roomId, "", 1, []string{"m.room.name"})
+	if err != nil {
+		return "", err
+	}
 	if len(res.messages) == 0 {
-		return ""
+		return "", nil
 	}
 	message := res.messages[0]
 	name, ok := message.rawContent["name"].(string)
 	if !ok {
-		return ""
+		return "", errors.New("failed to retrieve room name, no name found")
 	}
-	return name
+	return name, nil
 }
 
-func getRoomStart(token string, roomId string) string {
-	res := getRoomMessages(token, roomId, "", 1, []string{"m.room.create"})
+func getRoomStart(token string, roomId string) (string, error) {
+	t := "m.room.create"
+	res, err := getRoomMessages(token, roomId, "", 1, []string{t})
+	if err != nil {
+		return "", err
+	}
 	if len(res.messages) == 0 {
-		log.Fatalf("Failed to retrieve room start")
+		return "", fmt.Errorf("failed to retrieve room start, no message with type %q found", t)
 	}
 	// We go backward (dir=b) so the start of the messages is in
 	// the "end" field
-	return res.end
+	return res.end, nil
 }
 
 type userInfo struct {
@@ -396,41 +452,33 @@ type userInfo struct {
 
 var users map[string]*userInfo = map[string]*userInfo{}
 
-func getUserInfo(token string, userId string) *userInfo {
+func getUserInfo(token string, userId string) (*userInfo, error) {
 	info, ok := users[userId]
 	if ok {
-		return info
+		return info, nil
 	}
-	url := baseUrl + "/profile/" + userId
-	req, err := http.NewRequest("GET", url, nil)
+	resp, err := request(token, baseUrl+"/profile/"+userId, nil)
 	if err != nil {
-		log.Fatalf("Failed to retrieve user info: %v", err)
-	}
-	q := req.URL.Query()
-	q.Set("access_token", token)
-	req.URL.RawQuery = q.Encode()
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Fatalf("Failed to retrieve user info: %v", err)
+		return nil, fmt.Errorf("failed to retrieve user info: %w", err)
 	}
 	defer resp.Body.Close()
 	var respJson map[string]string
 	err = json.NewDecoder(resp.Body).Decode(&respJson)
 	if err != nil {
-		log.Fatalf("Failed to retrieve user info: %v", err)
+		return nil, fmt.Errorf("failed to retrieve user info: %w", err)
 	}
-	errMsg := "Failed to retrieve user info, unable to parse response: %v"
+	errMsg := "failed to retrieve user info, unable to parse response: %v"
 	name, ok := respJson["displayname"]
 	if !ok {
-		log.Fatalf(errMsg, respJson)
+		return nil, fmt.Errorf(errMsg, respJson)
 	}
 	address, ok := respJson["address"]
 	if !ok {
-		log.Fatalf(errMsg, respJson)
+		return nil, fmt.Errorf(errMsg, respJson)
 	}
 	info = &userInfo{name, address}
 	users[userId] = info
-	return info
+	return info, nil
 }
 
 func downloadFile(token string, info *fileInfo, downloadDir string) (err error) {
@@ -441,78 +489,58 @@ func downloadFile(token string, info *fileInfo, downloadDir string) (err error) 
 			err = nil
 			return
 		}
-		err = fmt.Errorf("Failed to create file %q: %w", fileName, err)
+		err = fmt.Errorf("failed to create file %q: %w", fileName, err)
 		return
 	}
 	defer func() {
 		f.Close()
 		if err != nil {
 			if err := os.Remove(fileName); err != nil {
-				errMsg := fmt.Sprintf("Failed to remove %q", fileName)
+				errMsg := fmt.Sprintf("failed to remove %q", fileName)
 				panic(errMsg)
 			}
 		}
 	}()
-	req, err := http.NewRequest("GET", info.url, nil)
+	resp, err := request(token, info.url, nil)
 	if err != nil {
-		err = fmt.Errorf("Failed to download %q: %w", fileName, err)
-		return
-	}
-	q := req.URL.Query()
-	q.Set("access_token", token)
-	req.URL.RawQuery = q.Encode()
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		err = fmt.Errorf("Failed to download %q: %w", fileName, err)
+		err = fmt.Errorf("failed to download %q: %w", fileName, err)
 		return
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		err = fmt.Errorf("Failed to download %q, unexpected HTTP code: %d", fileName, resp.StatusCode)
-		return
-	}
 	if _, err = io.Copy(f, resp.Body); err != nil {
-		err = fmt.Errorf("Failed to download %q: %w", fileName, err)
+		err = fmt.Errorf("failed to download %q: %w", fileName, err)
 		return
 	}
 	return
 }
 
-func getPassword(passwordFile string) string {
+func getPassword(passwordFile string) (string, error) {
 	var password []byte
 	if passwordFile == "" {
 		if !terminal.IsTerminal(syscall.Stdin) {
-			log.Fatal("No password file specified and stdin is not a terminal")
+			return "", errors.New("no password file specified and stdin is not a terminal")
 		}
 		if !terminal.IsTerminal(syscall.Stdout) {
-			log.Fatal("No password file specified and stdout is not a terminal, use -output")
+			return "", errors.New("no password file specified and stdout is not a terminal")
 		}
 		fmt.Print("Password: ")
 		var err error
 		password, err = terminal.ReadPassword(syscall.Stdin)
 		if err != nil {
-			log.Fatalf("Failed to read password: %v", err)
+			return "", fmt.Errorf("failed to read password: %w", err)
 		}
 		fmt.Println()
 	} else {
 		f, err := os.Open(passwordFile)
 		if err != nil {
-			log.Fatalf(
-				"Failed to open password file '%s': %v",
-				passwordFile,
-				err,
-			)
+			return "", fmt.Errorf("failed to open password file %q: %w", passwordFile, err)
 		}
 		password, err = ioutil.ReadAll(f)
 		if err != nil {
-			log.Fatalf(
-				"Failed to read password file '%s': %v",
-				passwordFile,
-				err,
-			)
+			return "", fmt.Errorf("failed to read password file %q: %w", passwordFile, err)
 		}
 	}
-	return string(password)
+	return string(password), nil
 }
 
 func main() {
@@ -526,9 +554,18 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
-	password := getPassword(*passwordFile)
-	token := getAccessToken(*email, password)
-	rooms := getRooms(token)
+	password, err := getPassword(*passwordFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	token, err := getAccessToken(*email, password)
+	if err != nil {
+		log.Fatal(err)
+	}
+	rooms, err := getRooms(token)
+	if err != nil {
+		log.Fatal(err)
+	}
 	var room *room
 	for _, r := range rooms {
 		if r.name == *roomName {
@@ -538,7 +575,10 @@ func main() {
 	if room == nil {
 		log.Fatalf("Room '%s' not found", *roomName)
 	}
-	res := getRoomMessages(token, room.id, "f", 0, []string{"m.room.message"})
+	res, err := getRoomMessages(token, room.id, "f", 0, []string{"m.room.message"})
+	if err != nil {
+		log.Fatal(err)
+	}
 	downloadDir := filepath.Join(*outputDir, contentDir)
 	if err := os.MkdirAll(downloadDir, 0755); err != nil {
 		log.Fatal("Failed to create download dir")
