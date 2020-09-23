@@ -213,7 +213,7 @@ func (c *textContent) MarshalHTML() template.HTML {
 	if c.html != "" {
 		h = c.html
 	} else {
-		h = fmt.Sprintf("<p>%s</p>", html.EscapeString(c.text))
+		h = fmt.Sprintf(`<p style="white-space:pre-wrap">%s</p>`, html.EscapeString(c.text))
 	}
 	return template.HTML(h)
 }
