@@ -117,8 +117,7 @@ func getAccessToken(email string, password string) (string, error) {
 		return "", fmt.Errorf("unable to get token: %s", msg)
 	}
 	var loginResp map[string]string
-	err = json.NewDecoder(resp.Body).Decode(&loginResp)
-	if err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&loginResp); err != nil {
 		return "", fmt.Errorf("unable to get token: %w", err)
 	}
 	token, ok := loginResp["access_token"]
@@ -157,8 +156,7 @@ func getRooms(token string) ([]*room, error) {
 	}
 	defer resp.Body.Close()
 	var respJson map[string][]string
-	err = json.NewDecoder(resp.Body).Decode(&respJson)
-	if err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&respJson); err != nil {
 		return nil, fmt.Errorf("failed to retrieve rooms: %w", err)
 	}
 	joinedRooms, ok := respJson["joined_rooms"]
@@ -358,8 +356,7 @@ func getRoomMessages(token string, roomId string, dir string, types []string) (*
 		}
 		defer resp.Body.Close()
 		var respJson map[string]interface{}
-		err = json.NewDecoder(resp.Body).Decode(&respJson)
-		if err != nil {
+		if err := json.NewDecoder(resp.Body).Decode(&respJson); err != nil {
 			return nil, fmt.Errorf("failed to retrieve room messages: %w", err)
 		}
 		errMsg := "failed to retrieve room messages, unable to parse response: %v"
@@ -505,8 +502,7 @@ func getUserInfo(token string, userId string) (*userInfo, error) {
 	}
 	defer resp.Body.Close()
 	var respJson map[string]string
-	err = json.NewDecoder(resp.Body).Decode(&respJson)
-	if err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&respJson); err != nil {
 		return nil, fmt.Errorf("failed to retrieve user info: %w", err)
 	}
 	errMsg := "failed to retrieve user info, unable to parse response: %v"
@@ -639,7 +635,7 @@ func main() {
 	outputDir := flag.String("output-dir", "", "output directory")
 	flag.Parse()
 	if *email == "" || *roomName == "" || *outputDir == "" {
-		log.Println("Missing required argument")
+		log.Println("missing required argument")
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -662,7 +658,7 @@ func main() {
 		}
 	}
 	if room == nil {
-		log.Fatalf("Room '%s' not found", *roomName)
+		log.Fatalf("room '%s' not found", *roomName)
 	}
 	res, err := getRoomMessages(token, room.id, "f", []string{"m.room.message"})
 	if err != nil {
@@ -670,15 +666,15 @@ func main() {
 	}
 	downloadDir := filepath.Join(*outputDir, contentDir)
 	if err := os.MkdirAll(downloadDir, 0755); err != nil {
-		log.Fatal("Failed to create download dir")
+		log.Fatal("failed to create download dir")
 	}
 	outputFileName := filepath.Join(*outputDir, "messages.html")
 	output, err := os.Create(outputFileName)
 	if err != nil {
-		log.Fatalf("Failed to create output file %q: %v", outputFileName, err)
+		log.Fatalf("failed to create output file %q: %v", outputFileName, err)
 	}
 	if err := tmpl.Execute(output, res.messages); err != nil {
-		log.Fatalf("Failed to write output: %v", err)
+		log.Fatalf("failed to write output: %v", err)
 	}
 	var infos []*fileInfo
 	for _, msg := range res.messages {
