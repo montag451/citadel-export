@@ -585,6 +585,53 @@ func getPassword(passwordFile string) (string, error) {
 	return string(password), nil
 }
 
+func downloadFiles(token string, infos []*fileInfo, downloadDir string) []error {
+	nbWorkers := 20
+	done := make(chan struct{}, nbWorkers)
+	infoChan := make(chan *fileInfo, nbWorkers)
+	errChan := make(chan error)
+	defer close(errChan)
+	bar := pb.StartNew(len(infos))
+	defer bar.Finish()
+	for i := 0; i < nbWorkers; i++ {
+		go func() {
+			defer func() {
+				done <- struct{}{}
+			}()
+			for info := range infoChan {
+				errChan <- downloadFile(token, info, downloadDir)
+				bar.Increment()
+			}
+		}()
+	}
+	errors := make([]error, 0, len(infos))
+	for _, info := range infos {
+	selectLoop:
+		for {
+			select {
+			case infoChan <- info:
+				break selectLoop
+			case err := <-errChan:
+				if err != nil {
+					errors = append(errors, err)
+				}
+			}
+		}
+	}
+	close(infoChan)
+	for i := 0; i < nbWorkers; {
+		select {
+		case err := <-errChan:
+			if err != nil {
+				errors = append(errors, err)
+			}
+		case <-done:
+			i++
+		}
+	}
+	return errors
+}
+
 func main() {
 	email := flag.String("email", "", "email address")
 	roomName := flag.String("room", "", "room to export")
@@ -643,50 +690,10 @@ func main() {
 			infos = append(infos, info)
 		}
 	}
-	nbWorkers := 20
-	done := make(chan struct{}, nbWorkers)
-	infoChan := make(chan *fileInfo, nbWorkers)
-	errChan := make(chan error)
-	bar := pb.StartNew(len(infos))
-	for i := 0; i < nbWorkers; i++ {
-		go func() {
-			defer func() {
-				done <- struct{}{}
-			}()
-			for info := range infoChan {
-				errChan <- downloadFile(token, info, downloadDir)
-				bar.Increment()
-			}
-		}()
-	}
-	log.Println("Downloading files...")
-	errors := make([]error, 0, len(infos))
-	for _, info := range infos {
-	selectLoop:
-		for {
-			select {
-			case infoChan <- info:
-				break selectLoop
-			case err := <-errChan:
-				if err != nil {
-					errors = append(errors, err)
-				}
-			}
+	if len(infos) > 0 {
+		fmt.Println("downloading files...")
+		for _, err := range downloadFiles(token, infos, downloadDir) {
+			log.Println(err)
 		}
-	}
-	close(infoChan)
-	for i := 0; i < nbWorkers; {
-		select {
-		case err := <-errChan:
-			if err != nil {
-				errors = append(errors, err)
-			}
-		case <-done:
-			i++
-		}
-	}
-	bar.Finish()
-	for _, err := range errors {
-		log.Println(err)
 	}
 }
