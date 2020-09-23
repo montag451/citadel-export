@@ -690,7 +690,7 @@ func main() {
 		}
 	}
 	if len(infos) > 0 {
-		fmt.Println("downloading files...")
+		log.Println("downloading files...")
 		for _, err := range downloadFiles(token, infos, downloadDir) {
 			log.Println(err)
 		}
