@@ -127,7 +127,12 @@ func getAccessToken(email string, password string) (string, error) {
 	return token, nil
 }
 
+var myId string
+
 func getMyUserId(token string) (string, error) {
+	if myId != "" {
+		return myId, nil
+	}
 	resp, err := request(token, baseUrl+"/account/whoami", nil)
 	if err != nil {
 		return "", fmt.Errorf("unable to retrieve my user ID: %w", err)
@@ -141,6 +146,7 @@ func getMyUserId(token string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("unable to get my user ID, missing user_id in response: %v", respJson)
 	}
+	myId = id
 	return id, nil
 }
 
