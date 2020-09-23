@@ -128,6 +128,23 @@ func getAccessToken(email string, password string) (string, error) {
 	return token, nil
 }
 
+func getMyUserId(token string) (string, error) {
+	resp, err := request(token, baseUrl+"/account/whoami", nil)
+	if err != nil {
+		return "", fmt.Errorf("unable to retrieve my user ID: %w", err)
+	}
+	defer resp.Body.Close()
+	var respJson map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&respJson); err != nil {
+		return "", fmt.Errorf("unable to retrieve my user ID: %w", err)
+	}
+	id, ok := respJson["user_id"]
+	if !ok {
+		return "", fmt.Errorf("unable to get my user ID, missing user_id in response: %v", respJson)
+	}
+	return id, nil
+}
+
 type room struct {
 	id   string
 	name string
@@ -418,6 +435,34 @@ func getRoomName(token string, roomId string) (string, error) {
 		return "", err
 	}
 	if len(res.messages) == 0 {
+		// Private chat, look for the first membership message
+		// not related to our id
+		myId, err := getMyUserId(token)
+		if err != nil {
+			return "", err
+		}
+		res, err := getRoomMessages(token, roomId, "f", []string{"m.room.member"})
+		if err != nil {
+			return "", err
+		}
+		if len(res.messages) == 0 {
+			return "", nil
+		}
+		for _, msg := range res.messages {
+			userId, ok := msg.rawMessage["user_id"].(string)
+			if !ok {
+				return "", errors.New("failed to retrieve room name, no user_id found")
+			}
+			if userId == myId {
+				continue
+			}
+			name, ok := msg.rawContent["displayname"].(string)
+			if !ok {
+				return "", errors.New("failed to retrieve room name, no displayname found")
+			}
+			return name, nil
+		}
+		// No membership messages not related to our id found...
 		return "", nil
 	}
 	message := res.messages[0]
