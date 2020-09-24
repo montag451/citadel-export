@@ -545,6 +545,14 @@ func getRoomStart(token string, roomId string) (string, error) {
 	return res.end, nil
 }
 
+func groupRoomsByName(rooms []*room) map[string][]*room {
+	m := map[string][]*room{}
+	for _, room := range rooms {
+		m[room.name] = append(m[room.name], room)
+	}
+	return m
+}
+
 type userInfo struct {
 	Name  string
 	Email string
@@ -687,12 +695,13 @@ func downloadFiles(token string, infos []*fileInfo, downloadDir string) []error 
 
 func main() {
 	email := flag.String("email", "", "email address")
-	roomName := flag.String("room", "", "room to export")
+	roomName := flag.String("room-name", "", "name of the room to export")
+	roomId := flag.String("room-id", "", "ID of the room to export")
 	passwordFile := flag.String("password-file", "", "file containing password")
 	outputDir := flag.String("output-dir", "", "output directory")
 	reverse := flag.Bool("reverse", false, "export in reverse chronological order")
 	flag.Parse()
-	if *email == "" || *roomName == "" || *outputDir == "" {
+	if *email == "" || *roomName == "" && *roomId == "" || *outputDir == "" {
 		log.Println("Missing required argument")
 		flag.Usage()
 		os.Exit(1)
@@ -712,9 +721,31 @@ func main() {
 		log.Fatal("Failed to get available rooms: ", err)
 	}
 	var room *room
-	for _, r := range rooms {
-		if r.name == *roomName {
-			room = r
+	if *roomName != "" && *roomId != "" {
+		log.Println("Both flags room-name and room-id has been specified, use room-id")
+	}
+	if *roomId != "" {
+		for _, r := range rooms {
+			if r.id == *roomId {
+				room = r
+			}
+		}
+	} else {
+		groups := groupRoomsByName(rooms)
+		for name, rooms := range groups {
+			if name != *roomName {
+				continue
+			}
+			if n := len(rooms); n > 1 {
+				log.Printf("The name %q is shared by %d rooms\n", name, n)
+				log.Println("Use the room-id flag to select the room to export")
+				log.Printf("The IDs of the rooms sharing the name %q are:\n", name)
+				for _, room := range rooms {
+					fmt.Println(room.id)
+				}
+				os.Exit(1)
+			}
+			room = rooms[0]
 		}
 	}
 	if room == nil {
@@ -763,6 +794,6 @@ func main() {
 		}
 		log.Printf("Re-run the same command to retry the download of failed files")
 	} else {
-		log.Printf("Room %q has been successfully exported to %q\n", *roomName, *outputDir)
+		log.Printf("Room %q has been successfully exported to %q\n", room.name, *outputDir)
 	}
 }
