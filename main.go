@@ -752,11 +752,18 @@ func main() {
 			infos = append(infos, info)
 		}
 	}
+	var errors []error
 	if len(infos) > 0 {
 		log.Println("Downloading files...")
-		for _, err := range downloadFiles(token, infos, downloadDir) {
-			log.Println(err)
-		}
+		errors = downloadFiles(token, infos, downloadDir)
 	}
-	log.Printf("Room %q has been successfully exported to %q\n", *roomName, *outputDir)
+	if len(errors) > 0 {
+		log.Printf("Some errors were encountered while downloading files:\n")
+		for _, err := range errors {
+			fmt.Println(err)
+		}
+		log.Printf("Re-run the same command to retry the download of failed files")
+	} else {
+		log.Printf("Room %q has been successfully exported to %q\n", *roomName, *outputDir)
+	}
 }
