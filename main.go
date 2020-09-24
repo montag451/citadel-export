@@ -691,6 +691,7 @@ func main() {
 	roomName := flag.String("room", "", "room to export")
 	passwordFile := flag.String("password-file", "", "file containing password")
 	outputDir := flag.String("output-dir", "", "output directory")
+	reverse := flag.Bool("reverse", false, "export in reverse chronological order")
 	flag.Parse()
 	if *email == "" || *roomName == "" || *outputDir == "" {
 		log.Println("Missing required argument")
@@ -721,7 +722,11 @@ func main() {
 		log.Fatalf("Room %q not found", *roomName)
 	}
 	log.Println("Fetching room messages...")
-	res, err := getRoomMessages(token, room.id, "f", []string{"m.room.message"})
+	var dir string
+	if !*reverse {
+		dir = "f"
+	}
+	res, err := getRoomMessages(token, room.id, dir, []string{"m.room.message"})
 	if err != nil {
 		log.Fatal("Failed to fetch messages: ", err)
 	}
