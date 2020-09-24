@@ -205,6 +205,7 @@ var contentParsers map[string]contentParser = map[string]contentParser{
 	"m.text":  textContentParser,
 	"m.image": imageContentParser,
 	"m.file":  fileContentParser,
+	"m.video": videoContentParser,
 }
 
 type textContent struct {
@@ -312,6 +313,47 @@ func fileContentParser(m map[string]interface{}) (content, error) {
 		mimeType, _ = info["mimetype"].(string)
 	}
 	return &fileContent{name, u, mimeType}, nil
+}
+
+type videoContent struct {
+	name     string
+	url      *url.URL
+	mimeType string
+}
+
+func (c *videoContent) fileInfo() *fileInfo {
+	return &fileInfo{
+		name:       c.name,
+		uniqueName: c.url.Path,
+		url:        baseMediaUrl + "/download/" + c.url.Host + c.url.Path,
+	}
+}
+
+func (c *videoContent) MarshalHTML() template.HTML {
+	src := path.Join(contentDir, c.url.Path)
+	htmlFmt := `<video src="%s" type="%s" alt="%s" controls="" style="max-width:100%%;height:auto"></video>`
+	return template.HTML(fmt.Sprintf(htmlFmt, src, c.mimeType, c.name))
+}
+
+func videoContentParser(m map[string]interface{}) (content, error) {
+	errMsg := "failed to parse video message, missing %q"
+	name, ok := m["body"].(string)
+	if !ok {
+		return nil, fmt.Errorf(errMsg, "body")
+	}
+	urlStr, ok := m["url"].(string)
+	if !ok {
+		return nil, fmt.Errorf(errMsg, "url")
+	}
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse video URL %q: %w", urlStr, err)
+	}
+	var mimeType string
+	if info, ok := m["info"].(map[string]interface{}); ok {
+		mimeType, _ = info["mimetype"].(string)
+	}
+	return &videoContent{name, u, mimeType}, nil
 }
 
 type message struct {
