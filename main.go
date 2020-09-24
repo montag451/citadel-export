@@ -73,7 +73,7 @@ func parseMatrixError(r io.Reader) (mError matrixError, err error) {
 func request(token string, url string, params url.Values) (*http.Response, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make request to %q: %w", url, err)
+		return nil, fmt.Errorf("request to %q failed: %w", url, err)
 	}
 	q := req.URL.Query()
 	q.Set("access_token", token)
@@ -85,14 +85,14 @@ func request(token string, url string, params url.Values) (*http.Response, error
 	req.URL.RawQuery = q.Encode()
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make request to %q: %w", url, err)
+		return nil, fmt.Errorf("request to %q failed: %w", url, err)
 	}
 	if resp.StatusCode != 200 {
 		mError, err := parseMatrixError(resp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("failed to make request to %q, unexpected HTTP code: %d", url, resp.StatusCode)
+			return nil, fmt.Errorf("request to %q failed, unexpected HTTP code: %d", url, resp.StatusCode)
 		}
-		return nil, fmt.Errorf("failed to make request to %q: %w", url, mError)
+		return nil, fmt.Errorf("request to %q failed: %w", url, mError)
 	}
 	return resp, nil
 }
