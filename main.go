@@ -511,12 +511,17 @@ type userInfo struct {
 var users map[string]*userInfo = map[string]*userInfo{}
 
 func getUserInfo(token string, userId string) (*userInfo, error) {
-	info, ok := users[userId]
-	if ok {
+	if info, ok := users[userId]; ok {
 		return info, nil
 	}
 	resp, err := request(token, baseUrl+"/profile/"+userId, nil)
 	if err != nil {
+		var mError matrixError
+		if errors.As(err, &mError) && mError.Errcode == "M_NOT_FOUND" {
+			info := &userInfo{userId, "UNKNOWN"}
+			users[userId] = info
+			return info, nil
+		}
 		return nil, fmt.Errorf("failed to retrieve user info: %w", err)
 	}
 	defer resp.Body.Close()
@@ -533,7 +538,7 @@ func getUserInfo(token string, userId string) (*userInfo, error) {
 	if !ok {
 		return nil, fmt.Errorf(errMsg, respJson)
 	}
-	info = &userInfo{name, address}
+	info := &userInfo{name, address}
 	users[userId] = info
 	return info, nil
 }
