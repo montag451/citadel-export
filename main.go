@@ -37,14 +37,14 @@ var tmpl *template.Template = template.Must(template.New("").Parse(`
     <meta charset="UTF-8">
   </head>
   <body>
-    {{- range . }}
+    {{ range . }}
     <h3>[{{ .Date.Format "2006-01-02 15:04:05" }}] {{ .Sender.Name }} ({{ .Sender.Email }})</h3>
     {{ if .ParsedContent }}
     {{ .ParsedContent.MarshalHTML }}
     {{ else }}
     ** UNHANDLED MESSAGE TYPE **
     {{ end }}
-    {{- end }}
+    {{ end }}
   </body>
 </html>`))
 
