@@ -607,12 +607,12 @@ func downloadFile(token string, info *fileInfo, downloadDir string) (err error) 
 	}()
 	resp, err := request(token, info.url, nil)
 	if err != nil {
-		err = fmt.Errorf("failed to download %q: %w", fileName, err)
+		err = fmt.Errorf("failed to download %q: %w", info.name, err)
 		return
 	}
 	defer resp.Body.Close()
 	if _, err = io.Copy(f, resp.Body); err != nil {
-		err = fmt.Errorf("failed to download %q: %w", fileName, err)
+		err = fmt.Errorf("failed to download %q: %w", info.name, err)
 		return
 	}
 	return
