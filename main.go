@@ -592,6 +592,35 @@ func getUserInfo(token string, userId string) (*userInfo, error) {
 	return info, nil
 }
 
+func getPassword(passwordFile string) (string, error) {
+	var password []byte
+	if passwordFile == "" {
+		if !terminal.IsTerminal(syscall.Stdin) {
+			return "", errors.New("no password file specified and stdin is not a terminal")
+		}
+		if !terminal.IsTerminal(syscall.Stdout) {
+			return "", errors.New("no password file specified and stdout is not a terminal")
+		}
+		fmt.Print("Password: ")
+		var err error
+		password, err = terminal.ReadPassword(syscall.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("failed to read password: %w", err)
+		}
+		fmt.Println()
+	} else {
+		f, err := os.Open(passwordFile)
+		if err != nil {
+			return "", fmt.Errorf("failed to open password file %q: %w", passwordFile, err)
+		}
+		password, err = ioutil.ReadAll(f)
+		if err != nil {
+			return "", fmt.Errorf("failed to read password file %q: %w", passwordFile, err)
+		}
+	}
+	return string(password), nil
+}
+
 func downloadFile(token string, info *fileInfo, downloadDir string) (err error) {
 	fileName := filepath.Join(downloadDir, info.uniqueName)
 	f, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
@@ -623,35 +652,6 @@ func downloadFile(token string, info *fileInfo, downloadDir string) (err error) 
 		return
 	}
 	return
-}
-
-func getPassword(passwordFile string) (string, error) {
-	var password []byte
-	if passwordFile == "" {
-		if !terminal.IsTerminal(syscall.Stdin) {
-			return "", errors.New("no password file specified and stdin is not a terminal")
-		}
-		if !terminal.IsTerminal(syscall.Stdout) {
-			return "", errors.New("no password file specified and stdout is not a terminal")
-		}
-		fmt.Print("Password: ")
-		var err error
-		password, err = terminal.ReadPassword(syscall.Stdin)
-		if err != nil {
-			return "", fmt.Errorf("failed to read password: %w", err)
-		}
-		fmt.Println()
-	} else {
-		f, err := os.Open(passwordFile)
-		if err != nil {
-			return "", fmt.Errorf("failed to open password file %q: %w", passwordFile, err)
-		}
-		password, err = ioutil.ReadAll(f)
-		if err != nil {
-			return "", fmt.Errorf("failed to read password file %q: %w", passwordFile, err)
-		}
-	}
-	return string(password), nil
 }
 
 func downloadFiles(token string, infos []*fileInfo, downloadDir string) []error {
