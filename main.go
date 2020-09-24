@@ -559,7 +559,7 @@ func getUserInfo(token string, userId string) (*userInfo, error) {
 	resp, err := request(token, baseUrl+"/profile/"+userId, nil)
 	if err != nil {
 		var mError matrixError
-		if errors.As(err, &mError) && mError.Errcode == "M_NOT_FOUND" {
+		if errors.As(err, &mError) {
 			info := &userInfo{userId, "UNKNOWN"}
 			users[userId] = info
 			return info, nil
@@ -571,14 +571,13 @@ func getUserInfo(token string, userId string) (*userInfo, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&respJson); err != nil {
 		return nil, fmt.Errorf("failed to retrieve user info: %w", err)
 	}
-	errMsg := "failed to retrieve user info, unable to parse response: %v"
 	name, ok := respJson["displayname"]
 	if !ok {
-		return nil, fmt.Errorf(errMsg, respJson)
+		name = userId
 	}
 	address, ok := respJson["address"]
 	if !ok {
-		return nil, fmt.Errorf(errMsg, respJson)
+		address = "UNKNOWN"
 	}
 	info := &userInfo{name, address}
 	users[userId] = info
