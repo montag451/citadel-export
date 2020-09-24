@@ -48,21 +48,25 @@ var tmpl *template.Template = template.Must(template.New("").Parse(`
   </body>
 </html>`))
 
-func parseMatrixError(r io.Reader) (code string, message string, err error) {
-	var resp struct {
-		Errcode string `json:"errcode"`
-		Error   string `json:"error"`
-	}
-	if err = json.NewDecoder(r).Decode(&resp); err != nil {
+type matrixError struct {
+	Errcode string `json:"errcode"`
+	MError  string `json:"error"`
+}
+
+func (e matrixError) Error() string {
+	return e.MError
+}
+
+func parseMatrixError(r io.Reader) (mError matrixError, err error) {
+	if err = json.NewDecoder(r).Decode(&mError); err != nil {
 		return
 	}
-	if resp.Errcode == "" {
+	if mError.Errcode == "" {
 		// If errcode is empty or absent, assume failure to
 		// parse response
 		err = errors.New("unable to parse response, empty or missing errcode")
 		return
 	}
-	code, message, err = resp.Errcode, resp.Error, nil
 	return
 }
 
@@ -84,11 +88,11 @@ func request(token string, url string, params url.Values) (*http.Response, error
 		return nil, fmt.Errorf("failed to make request to %q: %w", url, err)
 	}
 	if resp.StatusCode != 200 {
-		_, msg, err := parseMatrixError(resp.Body)
+		mError, err := parseMatrixError(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("failed to make request to %q, unexpected HTTP code: %d", url, resp.StatusCode)
 		}
-		return nil, fmt.Errorf("failed to make request to %q: %s", url, msg)
+		return nil, fmt.Errorf("failed to make request to %q: %w", url, mError)
 	}
 	return resp, nil
 }
@@ -114,11 +118,11 @@ func getAccessToken(email string, password string) (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		_, msg, err := parseMatrixError(resp.Body)
+		mError, err := parseMatrixError(resp.Body)
 		if err != nil {
 			return "", fmt.Errorf("unable to get token, unexpected HTTP code: %d", resp.StatusCode)
 		}
-		return "", fmt.Errorf("unable to get token: %s", msg)
+		return "", fmt.Errorf("unable to get token: %w", mError)
 	}
 	var loginResp map[string]string
 	if err := json.NewDecoder(resp.Body).Decode(&loginResp); err != nil {
