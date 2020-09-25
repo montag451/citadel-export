@@ -594,15 +594,17 @@ func getUserInfo(token string, userId string) (*userInfo, error) {
 func getPassword(passwordFile string) (string, error) {
 	var password []byte
 	if passwordFile == "" {
-		if !terminal.IsTerminal(0) {
+		stdin := int(os.Stdin.Fd())
+		if !terminal.IsTerminal(stdin) {
 			return "", errors.New("no password file specified and stdin is not a terminal")
 		}
-		if !terminal.IsTerminal(1) {
+		stdout := int(os.Stdout.Fd())
+		if !terminal.IsTerminal(stdout) {
 			return "", errors.New("no password file specified and stdout is not a terminal")
 		}
 		fmt.Print("Password: ")
 		var err error
-		password, err = terminal.ReadPassword(0)
+		password, err = terminal.ReadPassword(stdin)
 		if err != nil {
 			return "", fmt.Errorf("failed to read password: %w", err)
 		}
