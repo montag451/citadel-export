@@ -18,7 +18,6 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
-	"syscall"
 	"time"
 
 	"github.com/cheggaaa/pb"
@@ -595,15 +594,15 @@ func getUserInfo(token string, userId string) (*userInfo, error) {
 func getPassword(passwordFile string) (string, error) {
 	var password []byte
 	if passwordFile == "" {
-		if !terminal.IsTerminal(syscall.Stdin) {
+		if !terminal.IsTerminal(0) {
 			return "", errors.New("no password file specified and stdin is not a terminal")
 		}
-		if !terminal.IsTerminal(syscall.Stdout) {
+		if !terminal.IsTerminal(1) {
 			return "", errors.New("no password file specified and stdout is not a terminal")
 		}
 		fmt.Print("Password: ")
 		var err error
-		password, err = terminal.ReadPassword(syscall.Stdin)
+		password, err = terminal.ReadPassword(0)
 		if err != nil {
 			return "", fmt.Errorf("failed to read password: %w", err)
 		}
