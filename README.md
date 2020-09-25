@@ -8,7 +8,7 @@ compiled by you, you can compile the binary from sources. To do so,
 you need to install the [Go toolchain](https://golang.org/dl/). Once
 the go toolchain is installed on your machine, execute `go get -u
 github.com/montag451/citadel-export`. The binary will be installed in
-the `bin` directory of your `GOPATH` (use `get env GOPATH` to find out
+the `bin` directory of your `GOPATH` (use `go env GOPATH` to find out
 the value of `GOPATH` on your machine)
 
 # Usage #
