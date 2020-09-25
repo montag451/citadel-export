@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	baseUrl      = "https://thales.citadel.team/_matrix/client/r0"
-	baseMediaUrl = "https://thales.citadel.team/_matrix/media/r0"
+	baseURL      = "https://thales.citadel.team/_matrix/client/r0"
+	baseMediaURL = "https://thales.citadel.team/_matrix/media/r0"
 	contentDir   = "files"
 )
 
@@ -111,7 +111,7 @@ func getAccessToken(email string, password string) (string, error) {
 		return "", fmt.Errorf("unable to get token: %w", err)
 	}
 	bodyReader := bytes.NewReader(body)
-	resp, err := http.Post(baseUrl+"/login", "application/json", bodyReader)
+	resp, err := http.Post(baseURL+"/login", "application/json", bodyReader)
 	if err != nil {
 		return "", fmt.Errorf("unable to get token: %w", err)
 	}
@@ -134,26 +134,26 @@ func getAccessToken(email string, password string) (string, error) {
 	return token, nil
 }
 
-var myId string
+var myID string
 
-func getMyUserId(token string) (string, error) {
-	if myId != "" {
-		return myId, nil
+func getMyUserID(token string) (string, error) {
+	if myID != "" {
+		return myID, nil
 	}
-	resp, err := request(token, baseUrl+"/account/whoami", nil)
+	resp, err := request(token, baseURL+"/account/whoami", nil)
 	if err != nil {
 		return "", fmt.Errorf("unable to retrieve my user ID: %w", err)
 	}
 	defer resp.Body.Close()
-	var respJson map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&respJson); err != nil {
+	var respJSON map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&respJSON); err != nil {
 		return "", fmt.Errorf("unable to retrieve my user ID: %w", err)
 	}
-	id, ok := respJson["user_id"]
+	id, ok := respJSON["user_id"]
 	if !ok {
-		return "", fmt.Errorf("unable to get my user ID, missing user_id in response: %v", respJson)
+		return "", fmt.Errorf("unable to get my user ID, missing user_id in response: %v", respJSON)
 	}
-	myId = id
+	myID = id
 	return id, nil
 }
 
@@ -163,26 +163,26 @@ type room struct {
 }
 
 func getRooms(token string) ([]*room, error) {
-	resp, err := request(token, baseUrl+"/joined_rooms", nil)
+	resp, err := request(token, baseURL+"/joined_rooms", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve rooms: %w", err)
 	}
 	defer resp.Body.Close()
-	var respJson map[string][]string
-	if err := json.NewDecoder(resp.Body).Decode(&respJson); err != nil {
+	var respJSON map[string][]string
+	if err := json.NewDecoder(resp.Body).Decode(&respJSON); err != nil {
 		return nil, fmt.Errorf("failed to retrieve rooms: %w", err)
 	}
-	joinedRooms, ok := respJson["joined_rooms"]
+	joinedRooms, ok := respJSON["joined_rooms"]
 	if !ok {
-		return nil, fmt.Errorf("failed to retrieve rooms, unable to parse response: %v", respJson)
+		return nil, fmt.Errorf("failed to retrieve rooms, unable to parse response: %v", respJSON)
 	}
 	rooms := make([]*room, 0, len(joinedRooms))
-	for _, roomId := range joinedRooms {
-		name, err := getRoomName(token, roomId)
+	for _, roomID := range joinedRooms {
+		name, err := getRoomName(token, roomID)
 		if err != nil {
 			return nil, err
 		}
-		rooms = append(rooms, &room{id: roomId, name: name})
+		rooms = append(rooms, &room{id: roomID, name: name})
 	}
 	return rooms, nil
 }
@@ -247,7 +247,7 @@ func (c *imageContent) fileInfo() *fileInfo {
 	return &fileInfo{
 		name:       c.name,
 		uniqueName: c.url.Path,
-		url:        baseMediaUrl + "/download/" + c.url.Host + c.url.Path,
+		url:        baseMediaURL + "/download/" + c.url.Host + c.url.Path,
 	}
 }
 
@@ -284,7 +284,7 @@ func (c *fileContent) fileInfo() *fileInfo {
 	return &fileInfo{
 		name:       c.name,
 		uniqueName: c.url.Path,
-		url:        baseMediaUrl + "/download/" + c.url.Host + c.url.Path,
+		url:        baseMediaURL + "/download/" + c.url.Host + c.url.Path,
 	}
 }
 
@@ -324,7 +324,7 @@ func (c *videoContent) fileInfo() *fileInfo {
 	return &fileInfo{
 		name:       c.name,
 		uniqueName: c.url.Path,
-		url:        baseMediaUrl + "/download/" + c.url.Host + c.url.Path,
+		url:        baseMediaURL + "/download/" + c.url.Host + c.url.Path,
 	}
 }
 
@@ -369,7 +369,7 @@ type result struct {
 	end      string
 }
 
-func getRoomMessages(token string, roomId string, dir string, types []string) (*result, error) {
+func getRoomMessages(token string, roomID string, dir string, types []string) (*result, error) {
 	switch dir {
 	case "":
 		dir = "b"
@@ -381,7 +381,7 @@ func getRoomMessages(token string, roomId string, dir string, types []string) (*
 	var from string
 	if dir == "f" {
 		var err error
-		from, err = getRoomStart(token, roomId)
+		from, err = getRoomStart(token, roomID)
 		if err != nil {
 			return nil, err
 		}
@@ -410,19 +410,19 @@ func getRoomMessages(token string, roomId string, dir string, types []string) (*
 		if from != "" {
 			q.Set("from", from)
 		}
-		resp, err := request(token, baseUrl+"/rooms/"+roomId+"/messages", q)
+		resp, err := request(token, baseURL+"/rooms/"+roomID+"/messages", q)
 		if err != nil {
 			return nil, fmt.Errorf("failed to retrieve room messages: %w", err)
 		}
 		defer resp.Body.Close()
-		var respJson map[string]interface{}
-		if err := json.NewDecoder(resp.Body).Decode(&respJson); err != nil {
+		var respJSON map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&respJSON); err != nil {
 			return nil, fmt.Errorf("failed to retrieve room messages: %w", err)
 		}
 		errMsg := "failed to retrieve room messages, unable to parse response: %v"
-		chunks, ok := respJson["chunk"].([]interface{})
+		chunks, ok := respJSON["chunk"].([]interface{})
 		if !ok {
-			return nil, fmt.Errorf(errMsg, respJson)
+			return nil, fmt.Errorf(errMsg, respJSON)
 		}
 		if len(chunks) == 0 {
 			break
@@ -430,17 +430,17 @@ func getRoomMessages(token string, roomId string, dir string, types []string) (*
 		for _, chunk := range chunks {
 			rawMsg, ok := chunk.(map[string]interface{})
 			if !ok {
-				return nil, fmt.Errorf(errMsg, respJson)
+				return nil, fmt.Errorf(errMsg, respJSON)
 			}
 			ts, ok := rawMsg["origin_server_ts"].(float64)
 			if !ok {
-				return nil, fmt.Errorf(errMsg, respJson)
+				return nil, fmt.Errorf(errMsg, respJSON)
 			}
 			ns := math.Mod(ts, 1000) * math.Pow10(6)
 			date := time.Unix(int64(ts/1000), int64(ns))
 			sender, ok := rawMsg["sender"].(string)
 			if !ok {
-				return nil, fmt.Errorf(errMsg, respJson)
+				return nil, fmt.Errorf(errMsg, respJSON)
 			}
 			userInfo, err := getUserInfo(token, sender)
 			if err != nil {
@@ -448,7 +448,7 @@ func getRoomMessages(token string, roomId string, dir string, types []string) (*
 			}
 			rawContent, ok := rawMsg["content"].(map[string]interface{})
 			if !ok {
-				return nil, fmt.Errorf(errMsg, respJson)
+				return nil, fmt.Errorf(errMsg, respJSON)
 			}
 			var parsedContent content
 			if len(rawContent) != 0 {
@@ -472,33 +472,33 @@ func getRoomMessages(token string, roomId string, dir string, types []string) (*
 		}
 		if start == "" {
 			var ok bool
-			start, ok = respJson["start"].(string)
+			start, ok = respJSON["start"].(string)
 			if !ok {
-				return nil, fmt.Errorf(errMsg, respJson)
+				return nil, fmt.Errorf(errMsg, respJSON)
 			}
 		}
-		end, ok = respJson["end"].(string)
+		end, ok = respJSON["end"].(string)
 		if !ok {
-			return nil, fmt.Errorf(errMsg, respJson)
+			return nil, fmt.Errorf(errMsg, respJSON)
 		}
 		from = end
 	}
 	return &result{messages, start, end}, nil
 }
 
-func getRoomName(token string, roomId string) (string, error) {
-	res, err := getRoomMessages(token, roomId, "", []string{"m.room.name"})
+func getRoomName(token string, roomID string) (string, error) {
+	res, err := getRoomMessages(token, roomID, "", []string{"m.room.name"})
 	if err != nil {
 		return "", err
 	}
 	if len(res.messages) == 0 {
 		// Private chat, look for the first membership message
 		// not related to our id
-		myId, err := getMyUserId(token)
+		myID, err := getMyUserID(token)
 		if err != nil {
 			return "", err
 		}
-		res, err := getRoomMessages(token, roomId, "f", []string{"m.room.member"})
+		res, err := getRoomMessages(token, roomID, "f", []string{"m.room.member"})
 		if err != nil {
 			return "", err
 		}
@@ -506,11 +506,11 @@ func getRoomName(token string, roomId string) (string, error) {
 			return "", nil
 		}
 		for _, msg := range res.messages {
-			userId, ok := msg.rawMessage["user_id"].(string)
+			userID, ok := msg.rawMessage["user_id"].(string)
 			if !ok {
 				return "", errors.New("failed to retrieve room name, no user_id found")
 			}
-			if userId == myId {
+			if userID == myID {
 				continue
 			}
 			name, ok := msg.rawContent["displayname"].(string)
@@ -530,9 +530,9 @@ func getRoomName(token string, roomId string) (string, error) {
 	return name, nil
 }
 
-func getRoomStart(token string, roomId string) (string, error) {
+func getRoomStart(token string, roomID string) (string, error) {
 	t := "m.room.create"
-	res, err := getRoomMessages(token, roomId, "", []string{t})
+	res, err := getRoomMessages(token, roomID, "", []string{t})
 	if err != nil {
 		return "", err
 	}
@@ -559,35 +559,35 @@ type userInfo struct {
 
 var users map[string]*userInfo = map[string]*userInfo{}
 
-func getUserInfo(token string, userId string) (*userInfo, error) {
-	if info, ok := users[userId]; ok {
+func getUserInfo(token string, userID string) (*userInfo, error) {
+	if info, ok := users[userID]; ok {
 		return info, nil
 	}
-	resp, err := request(token, baseUrl+"/profile/"+userId, nil)
+	resp, err := request(token, baseURL+"/profile/"+userID, nil)
 	if err != nil {
 		var mError matrixError
 		if errors.As(err, &mError) {
-			info := &userInfo{userId, "UNKNOWN"}
-			users[userId] = info
+			info := &userInfo{userID, "UNKNOWN"}
+			users[userID] = info
 			return info, nil
 		}
 		return nil, fmt.Errorf("failed to retrieve user info: %w", err)
 	}
 	defer resp.Body.Close()
-	var respJson map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&respJson); err != nil {
+	var respJSON map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&respJSON); err != nil {
 		return nil, fmt.Errorf("failed to retrieve user info: %w", err)
 	}
-	name, ok := respJson["displayname"]
+	name, ok := respJSON["displayname"]
 	if !ok {
-		name = userId
+		name = userID
 	}
-	address, ok := respJson["address"]
+	address, ok := respJSON["address"]
 	if !ok {
 		address = "UNKNOWN"
 	}
 	info := &userInfo{name, address}
-	users[userId] = info
+	users[userID] = info
 	return info, nil
 }
 
@@ -697,12 +697,12 @@ func downloadFiles(token string, infos []*fileInfo, downloadDir string) []error 
 func main() {
 	email := flag.String("email", "", "email address")
 	roomName := flag.String("room-name", "", "name of the room to export")
-	roomId := flag.String("room-id", "", "ID of the room to export")
+	roomID := flag.String("room-id", "", "ID of the room to export")
 	passwordFile := flag.String("password-file", "", "file containing password")
 	outputDir := flag.String("output-dir", "", "output directory")
 	reverse := flag.Bool("reverse", false, "export in reverse chronological order")
 	flag.Parse()
-	if *email == "" || *roomName == "" && *roomId == "" || *outputDir == "" {
+	if *email == "" || *roomName == "" && *roomID == "" || *outputDir == "" {
 		log.Println("Missing required argument")
 		flag.Usage()
 		os.Exit(1)
@@ -722,12 +722,12 @@ func main() {
 		log.Fatal("Failed to get available rooms: ", err)
 	}
 	var room *room
-	if *roomName != "" && *roomId != "" {
+	if *roomName != "" && *roomID != "" {
 		log.Println("Both flags room-name and room-id has been specified, use room-id")
 	}
-	if *roomId != "" {
+	if *roomID != "" {
 		for _, r := range rooms {
-			if r.id == *roomId {
+			if r.id == *roomID {
 				room = r
 			}
 		}
