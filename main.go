@@ -20,7 +20,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cheggaaa/pb"
+	"github.com/cheggaaa/pb/v3"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
