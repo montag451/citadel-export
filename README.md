@@ -21,7 +21,7 @@ command understands. The required options are:
 - `room-name` or `room-id`
 - `output-dir`
 
-The option `output-dir` specify a directory where the result of the
+The option `output-dir` specifies a directory where the result of the
 export will be stored. It will contain a file named `messages.html`
 that will contain all the messages published in the room and a
 directory `files` that will contains all the files uploaded in the
