@@ -75,13 +75,13 @@ func request(token string, url string, params url.Values) (*http.Response, error
 		return nil, fmt.Errorf("request to %q failed: %w", url, err)
 	}
 	q := req.URL.Query()
-	q.Set("access_token", token)
 	for key, values := range params {
 		for _, value := range values {
 			q.Add(key, value)
 		}
 	}
 	req.URL.RawQuery = q.Encode()
+	req.Header.Add("Authorization", "Bearer "+token)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request to %q failed: %w", url, err)
