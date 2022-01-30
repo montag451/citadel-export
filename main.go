@@ -205,6 +205,7 @@ var contentParsers map[string]contentParser = map[string]contentParser{
 	"m.image": imageContentParser,
 	"m.file":  fileContentParser,
 	"m.video": videoContentParser,
+	"m.audio": audioContentParser,
 }
 
 type textContent struct {
@@ -324,6 +325,24 @@ func videoContentParser(m map[string]interface{}) (content, error) {
 		return nil, err
 	}
 	return &videoContent{mc}, nil
+}
+
+type audioContent struct {
+	*mediaContent
+}
+
+func (c *audioContent) MarshalHTML() template.HTML {
+	src := path.Join(contentDir, c.url.Path)
+	htmlFmt := `<audio src="%s" type="%s" alt="%s" controls="" style="max-width:100%%;height:auto"></audio>`
+	return template.HTML(fmt.Sprintf(htmlFmt, src, c.mimeType, c.name))
+}
+
+func audioContentParser(m map[string]interface{}) (content, error) {
+	mc, err := mediaContentParser("audio", m)
+	if err != nil {
+		return nil, err
+	}
+	return &audioContent{mc}, nil
 }
 
 type message struct {
