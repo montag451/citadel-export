@@ -315,8 +315,8 @@ type videoContent struct {
 
 func (c *videoContent) MarshalHTML() template.HTML {
 	src := path.Join(contentDir, c.url.Path)
-	htmlFmt := `<video src="%s" type="%s" alt="%s" controls="" style="max-width:100%%;height:auto"></video>`
-	return template.HTML(fmt.Sprintf(htmlFmt, src, c.mimeType, c.name))
+	htmlFmt := `<video src="%s" type="%s" controls=""></video>`
+	return template.HTML(fmt.Sprintf(htmlFmt, src, c.mimeType))
 }
 
 func videoContentParser(m map[string]interface{}) (content, error) {
@@ -333,8 +333,8 @@ type audioContent struct {
 
 func (c *audioContent) MarshalHTML() template.HTML {
 	src := path.Join(contentDir, c.url.Path)
-	htmlFmt := `<audio src="%s" type="%s" alt="%s" controls="" style="max-width:100%%;height:auto"></audio>`
-	return template.HTML(fmt.Sprintf(htmlFmt, src, c.mimeType, c.name))
+	htmlFmt := `<audio src="%s" type="%s" controls=""></audio>`
+	return template.HTML(fmt.Sprintf(htmlFmt, src, c.mimeType))
 }
 
 func audioContentParser(m map[string]interface{}) (content, error) {
