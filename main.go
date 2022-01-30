@@ -298,7 +298,7 @@ type fileContent struct {
 
 func (c *fileContent) MarshalHTML() template.HTML {
 	href := path.Join(contentDir, c.fileInfo().uniqueName)
-	return template.HTML(fmt.Sprintf(`<p><a href="%s" type="%s">%s</a></p>`, href, c.mimeType, c.name))
+	return template.HTML(fmt.Sprintf(`<p><a href="%s" target="_blank" type="%s">%s</a></p>`, href, c.mimeType, c.name))
 }
 
 func fileContentParser(m map[string]interface{}) (content, error) {
