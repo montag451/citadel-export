@@ -248,7 +248,7 @@ type mediaContent struct {
 func (c *mediaContent) fileInfo() *fileInfo {
 	return &fileInfo{
 		name:       c.name,
-		uniqueName: c.url.Path,
+		uniqueName: c.url.Path + "_" + c.name,
 		url:        baseMediaURL + "/download/" + c.url.Host + c.url.Path,
 	}
 }
@@ -279,7 +279,7 @@ type imageContent struct {
 }
 
 func (c *imageContent) MarshalHTML() template.HTML {
-	src := path.Join(contentDir, c.url.Path)
+	src := path.Join(contentDir, c.fileInfo().uniqueName)
 	imgFmt := `<img src="%s" alt="%s" style="max-width:100%%;height:auto"/>`
 	return template.HTML(fmt.Sprintf(imgFmt, src, c.name))
 }
@@ -297,7 +297,7 @@ type fileContent struct {
 }
 
 func (c *fileContent) MarshalHTML() template.HTML {
-	href := path.Join(contentDir, c.url.Path)
+	href := path.Join(contentDir, c.fileInfo().uniqueName)
 	return template.HTML(fmt.Sprintf(`<p><a href="%s" type="%s">%s</a></p>`, href, c.mimeType, c.name))
 }
 
@@ -314,7 +314,7 @@ type videoContent struct {
 }
 
 func (c *videoContent) MarshalHTML() template.HTML {
-	src := path.Join(contentDir, c.url.Path)
+	src := path.Join(contentDir, c.fileInfo().uniqueName)
 	htmlFmt := `<video src="%s" type="%s" controls=""></video>`
 	return template.HTML(fmt.Sprintf(htmlFmt, src, c.mimeType))
 }
@@ -332,7 +332,7 @@ type audioContent struct {
 }
 
 func (c *audioContent) MarshalHTML() template.HTML {
-	src := path.Join(contentDir, c.url.Path)
+	src := path.Join(contentDir, c.fileInfo().uniqueName)
 	htmlFmt := `<audio src="%s" type="%s" controls=""></audio>`
 	return template.HTML(fmt.Sprintf(htmlFmt, src, c.mimeType))
 }
