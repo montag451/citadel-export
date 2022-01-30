@@ -238,17 +238,43 @@ func textContentParser(m map[string]interface{}) (content, error) {
 	return &textContent{text, html}, nil
 }
 
-type imageContent struct {
-	name string
-	url  *url.URL
+type mediaContent struct {
+	name     string
+	url      *url.URL
+	mimeType string
 }
 
-func (c *imageContent) fileInfo() *fileInfo {
+func (c *mediaContent) fileInfo() *fileInfo {
 	return &fileInfo{
 		name:       c.name,
 		uniqueName: c.url.Path,
 		url:        baseMediaURL + "/download/" + c.url.Host + c.url.Path,
 	}
+}
+
+func mediaContentParser(msgType string, m map[string]interface{}) (*mediaContent, error) {
+	errMsg := fmt.Sprintf("failed to parse %q message, missing %%q", msgType)
+	name, ok := m["body"].(string)
+	if !ok {
+		return nil, fmt.Errorf(errMsg, "body")
+	}
+	urlStr, ok := m["url"].(string)
+	if !ok {
+		return nil, fmt.Errorf(errMsg, "url")
+	}
+	url, err := url.Parse(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse video URL %q: %w", urlStr, err)
+	}
+	var mimeType string
+	if info, ok := m["info"].(map[string]interface{}); ok {
+		mimeType, _ = info["mimetype"].(string)
+	}
+	return &mediaContent{name, url, mimeType}, nil
+}
+
+type imageContent struct {
+	*mediaContent
 }
 
 func (c *imageContent) MarshalHTML() template.HTML {
@@ -258,34 +284,15 @@ func (c *imageContent) MarshalHTML() template.HTML {
 }
 
 func imageContentParser(m map[string]interface{}) (content, error) {
-	errMsg := "failed to parse image message, missing %q"
-	name, ok := m["body"].(string)
-	if !ok {
-		return nil, fmt.Errorf(errMsg, "body")
-	}
-	urlStr, ok := m["url"].(string)
-	if !ok {
-		return nil, fmt.Errorf(errMsg, "url")
-	}
-	u, err := url.Parse(urlStr)
+	mc, err := mediaContentParser("image", m)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse image URL %q: %w", urlStr, err)
+		return nil, err
 	}
-	return &imageContent{name, u}, nil
+	return &imageContent{mc}, nil
 }
 
 type fileContent struct {
-	name     string
-	url      *url.URL
-	mimeType string
-}
-
-func (c *fileContent) fileInfo() *fileInfo {
-	return &fileInfo{
-		name:       c.name,
-		uniqueName: c.url.Path,
-		url:        baseMediaURL + "/download/" + c.url.Host + c.url.Path,
-	}
+	*mediaContent
 }
 
 func (c *fileContent) MarshalHTML() template.HTML {
@@ -294,38 +301,15 @@ func (c *fileContent) MarshalHTML() template.HTML {
 }
 
 func fileContentParser(m map[string]interface{}) (content, error) {
-	errMsg := "failed to parse file message, missing %q"
-	name, ok := m["body"].(string)
-	if !ok {
-		return nil, fmt.Errorf(errMsg, "body")
-	}
-	urlStr, ok := m["url"].(string)
-	if !ok {
-		return nil, fmt.Errorf(errMsg, "url")
-	}
-	u, err := url.Parse(urlStr)
+	mc, err := mediaContentParser("file", m)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse file URL %q: %w", urlStr, err)
+		return nil, err
 	}
-	var mimeType string
-	if info, ok := m["info"].(map[string]interface{}); ok {
-		mimeType, _ = info["mimetype"].(string)
-	}
-	return &fileContent{name, u, mimeType}, nil
+	return &fileContent{mc}, nil
 }
 
 type videoContent struct {
-	name     string
-	url      *url.URL
-	mimeType string
-}
-
-func (c *videoContent) fileInfo() *fileInfo {
-	return &fileInfo{
-		name:       c.name,
-		uniqueName: c.url.Path,
-		url:        baseMediaURL + "/download/" + c.url.Host + c.url.Path,
-	}
+	*mediaContent
 }
 
 func (c *videoContent) MarshalHTML() template.HTML {
@@ -335,24 +319,11 @@ func (c *videoContent) MarshalHTML() template.HTML {
 }
 
 func videoContentParser(m map[string]interface{}) (content, error) {
-	errMsg := "failed to parse video message, missing %q"
-	name, ok := m["body"].(string)
-	if !ok {
-		return nil, fmt.Errorf(errMsg, "body")
-	}
-	urlStr, ok := m["url"].(string)
-	if !ok {
-		return nil, fmt.Errorf(errMsg, "url")
-	}
-	u, err := url.Parse(urlStr)
+	mc, err := mediaContentParser("video", m)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse video URL %q: %w", urlStr, err)
+		return nil, err
 	}
-	var mimeType string
-	if info, ok := m["info"].(map[string]interface{}); ok {
-		mimeType, _ = info["mimetype"].(string)
-	}
-	return &videoContent{name, u, mimeType}, nil
+	return &videoContent{mc}, nil
 }
 
 type message struct {
