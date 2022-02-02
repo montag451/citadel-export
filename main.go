@@ -265,7 +265,7 @@ func mediaContentParser(msgType string, m map[string]interface{}) (*mediaContent
 	}
 	url, err := url.Parse(urlStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse video URL %q: %w", urlStr, err)
+		return nil, fmt.Errorf("failed to parse %s URL %q: %w", msgType, urlStr, err)
 	}
 	var mimeType string
 	if info, ok := m["info"].(map[string]interface{}); ok {
