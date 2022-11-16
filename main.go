@@ -30,7 +30,7 @@ const (
 	contentDir   = "files"
 )
 
-var tmpl *template.Template = template.Must(template.New("").Parse(`
+var tmpl = template.Must(template.New("").Parse(`
 <html>
   <head>
     <meta charset="UTF-8">
@@ -198,9 +198,9 @@ type content interface {
 	MarshalHTML() template.HTML
 }
 
-type contentParser = func(map[string]interface{}) (content, error)
+type contentParser func(map[string]interface{}) (content, error)
 
-var contentParsers map[string]contentParser = map[string]contentParser{
+var contentParsers = map[string]contentParser{
 	"m.text":  textContentParser,
 	"m.image": imageContentParser,
 	"m.file":  fileContentParser,
@@ -547,7 +547,7 @@ type userInfo struct {
 	Email string
 }
 
-var users map[string]*userInfo = map[string]*userInfo{}
+var users = map[string]*userInfo{}
 
 func getUserInfo(token string, userID string) (*userInfo, error) {
 	if info, ok := users[userID]; ok {
