@@ -175,7 +175,7 @@ type room struct {
 	name string
 }
 
-func getRooms(token string, roomID string, myID string) ([]*room, error) {
+func getRooms(token string, roomID string, roomName string, myID string) ([]*room, error) {
 	resp, err := request(token, baseURL+"/joined_rooms", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve rooms: %w", err)
@@ -190,12 +190,19 @@ func getRooms(token string, roomID string, myID string) ([]*room, error) {
 		return nil, fmt.Errorf("failed to retrieve rooms, unable to parse response: %v", respJSON)
 	}
 	rooms := make([]*room, 0, len(joinedRooms))
-	if roomID == "*" {
+	if roomID == "*" || roomName == "*" {
 		log.Println(colorRed, "/!\\ IMPORTANT NOTICE: ALL ROOMS found will exported /!\\", colorReset)
 	}
+
+	if roomName == "*" {
+		//NOTICE: If wilcard in room name, wilcard in room ID to simplify the code
+		roomID = "*"
+	}
+
 	for _, joinedroomID := range joinedRooms {
-		if roomID == "*" || joinedroomID == roomID {
-			name, err := getRoomName(token, joinedroomID, myID)
+		name, err := getRoomName(token, joinedroomID, myID)
+
+		if roomID == "*" || joinedroomID == roomID || name == roomName {
 			if err != nil {
 				if itemExists([3]string{"EMPTY_ROOM", "NO_MEMBERS"}, err.Error()) {
 					log.Println(colorPurple, "----> EMPTY ROOM IGNORED", colorReset, "{ ID: "+joinedroomID+"}")
@@ -775,10 +782,11 @@ func main() {
 	}
 
 	log.Println("Getting available rooms...")
-	rooms, err := getRooms(token, *roomID, myID)
+	rooms, err := getRooms(token, *roomID, *roomName, myID)
 	if err != nil {
 		log.Fatal("Failed to get available rooms: ", err)
 	}
+
 	var room *room
 	if *roomName != "" && *roomID != "" {
 		log.Println(colorCyan, "INFO: Both flags room-name and room-id has been specified, use room-id", colorReset)
@@ -788,55 +796,60 @@ func main() {
 	for _, r := range rooms {
 		if r.id == *roomID || *roomID == "*" {
 			room = r
-			log.Println(colorReset, "... ROOM", colorCyan, room.name, colorReset)
+		}
 
-			log.Println("1-", colorReset, "Fetching room messages...")
-			var dir string
-			if !*reverse {
-				dir = "f"
-			}
-			res, err := getRoomMessages(token, room.id, dir, []string{"m.room.message"})
-			if err != nil {
-				log.Fatal(colorRed, "----> Failed to fetch messages:", colorReset, err)
-			}
+		if room == nil {
+			log.Fatalf("Room %q not found", *roomName)
+		}
+		log.Println(colorReset, "... ROOM", colorCyan, room.name, colorReset)
 
-			downloadDir := filepath.Join(*outputDir, room.name, contentDir)
-			if err := os.MkdirAll(downloadDir, 0755); err != nil {
-				log.Fatalf(colorRed+"----> Failed to create download dir %q"+colorReset, downloadDir)
-			}
-			outputFileName := filepath.Join(*outputDir, room.name, "messages.html")
-			output, err := os.Create(outputFileName)
-			if err != nil {
-				log.Fatalf(colorRed+"----> Failed to create output file %q: %v"+colorReset, outputFileName, err)
-			}
-			if err := tmpl.Execute(output, res.messages); err != nil {
-				log.Fatalf(colorRed+"----> Failed to render output file %q: %v"+colorReset, outputFileName, err)
-			}
+		log.Println("1-", colorReset, "Fetching room messages...")
+		var dir string
+		if !*reverse {
+			dir = "f"
+		}
 
-			var infos []*fileInfo
-			for _, msg := range res.messages {
-				content := msg.ParsedContent
-				if content == nil {
-					continue
-				}
-				if info := content.fileInfo(); info != nil {
-					infos = append(infos, info)
-				}
+		res, err := getRoomMessages(token, room.id, dir, []string{"m.room.message"})
+		if err != nil {
+			log.Fatal(colorRed, "----> Failed to fetch messages:", colorReset, err)
+		}
+
+		downloadDir := filepath.Join(*outputDir, room.name, contentDir)
+		if err := os.MkdirAll(downloadDir, 0755); err != nil {
+			log.Fatalf(colorRed+"----> Failed to create download dir %q"+colorReset, downloadDir)
+		}
+		outputFileName := filepath.Join(*outputDir, room.name, "messages.html")
+		output, err := os.Create(outputFileName)
+		if err != nil {
+			log.Fatalf(colorRed+"----> Failed to create output file %q: %v"+colorReset, outputFileName, err)
+		}
+		if err := tmpl.Execute(output, res.messages); err != nil {
+			log.Fatalf(colorRed+"----> Failed to render output file %q: %v"+colorReset, outputFileName, err)
+		}
+
+		var infos []*fileInfo
+		for _, msg := range res.messages {
+			content := msg.ParsedContent
+			if content == nil {
+				continue
 			}
-			var errors []error
-			if len(infos) > 0 {
-				log.Println("2-", colorReset, "Downloading files...")
-				errors = downloadFiles(token, infos, downloadDir)
+			if info := content.fileInfo(); info != nil {
+				infos = append(infos, info)
 			}
-			if len(errors) > 0 {
-				log.Println(colorRed, "----> Some errors were encountered while downloading files:", colorReset)
-				for _, err := range errors {
-					fmt.Println(err)
-				}
-				log.Println(colorRed, "----> Re-run the same command to retry the download of failed files", colorReset)
-			} else {
-				log.Printf(colorReset+"     "+colorGreen+"Room has been successfully exported to %q\n"+colorReset, *outputDir)
+		}
+		var errors []error
+		if len(infos) > 0 {
+			log.Println("2-", colorReset, "Downloading files...")
+			errors = downloadFiles(token, infos, downloadDir)
+		}
+		if len(errors) > 0 {
+			log.Println(colorRed, "----> Some errors were encountered while downloading files:", colorReset)
+			for _, err := range errors {
+				fmt.Println(err)
 			}
+			log.Println(colorRed, "----> Re-run the same command to retry the download of failed files", colorReset)
+		} else {
+			log.Printf(colorReset+"     "+colorGreen+"Room has been successfully exported to %q\n"+colorReset, *outputDir)
 		}
 	}
 }
