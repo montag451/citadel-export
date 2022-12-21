@@ -753,8 +753,8 @@ func downloadFiles(token string, infos []*fileInfo, downloadDir string) []error 
 
 func main() {
 	email := flag.String("email", "", "email address")
-	roomName := flag.String("room-name", "", "name of the room to export")
-	roomID := flag.String("room-id", "", "ID of the room to export")
+	roomName := flag.String("room-name", "", "name of the room to export (* to get all)")
+	roomID := flag.String("room-id", "", "ID of the room to export (* to get all)")
 	passwordFile := flag.String("password-file", "", "file containing password")
 	outputDir := flag.String("output-dir", "", "output directory")
 	reverse := flag.Bool("reverse", false, "export in reverse chronological order")
