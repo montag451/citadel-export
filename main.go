@@ -648,6 +648,7 @@ func downloadFile(token string, info *fileInfo, downloadDir string) (err error) 
 func downloadFiles(token string, infos []*fileInfo, downloadDir string) []error {
 	nbWorkers := 20
 	done := make(chan struct{}, nbWorkers)
+	defer close(done)
 	infoChan := make(chan *fileInfo, nbWorkers)
 	errChan := make(chan error)
 	defer close(errChan)
