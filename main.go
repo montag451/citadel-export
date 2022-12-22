@@ -53,6 +53,9 @@ type matrixError struct {
 }
 
 func (e matrixError) Error() string {
+	if e.MError == "" {
+		return e.Errcode
+	}
 	return e.MError
 }
 
