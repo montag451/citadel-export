@@ -624,7 +624,9 @@ func downloadFile(token string, info *fileInfo, downloadDir string) (err error) 
 		return
 	}
 	defer func() {
-		f.Close()
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
 		if err != nil {
 			if err := os.Remove(fileName); err != nil {
 				errMsg := fmt.Sprintf("failed to remove %q", fileName)
@@ -637,7 +639,11 @@ func downloadFile(token string, info *fileInfo, downloadDir string) (err error) 
 		err = fmt.Errorf("failed to download %q: %w", info.name, err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	if _, err = io.Copy(f, resp.Body); err != nil {
 		err = fmt.Errorf("failed to download %q: %w", info.name, err)
 		return
