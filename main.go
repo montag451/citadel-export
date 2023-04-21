@@ -129,7 +129,7 @@ func getMFACreds(email string) (*mfaCreds, error) {
 		if err != nil {
 			return fmt.Errorf("unable to get MFA creds: %w", err)
 		}
-		bodyReader := io.TeeReader(bytes.NewReader(body), os.Stdout)
+		bodyReader := bytes.NewReader(body)
 		resp, err := http.Post(url, "application/json", bodyReader)
 		if err != nil {
 			return fmt.Errorf("unable to get MFA creds: %w", err)
