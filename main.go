@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -12,12 +13,14 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cheggaaa/pb/v3"
@@ -25,9 +28,11 @@ import (
 )
 
 const (
-	baseURL      = "https://thales.citadel.team/_matrix/client/r0"
-	baseMediaURL = "https://thales.citadel.team/_matrix/media/r0"
-	contentDir   = "files"
+	idServer        = "thales.citadel.team"
+	baseURL         = "https://thales.citadel.team/_matrix/client/r0"
+	baseIdentityURL = "https://thales.citadel.team/_matrix/identity/api/v1"
+	baseMediaURL    = "https://thales.citadel.team/_matrix/media/r0"
+	contentDir      = "files"
 )
 
 var tmpl = template.Must(template.New("").Parse(`
@@ -46,6 +51,17 @@ var tmpl = template.Must(template.New("").Parse(`
     {{ end }}
   </body>
 </html>`))
+
+func randomString(n int) string {
+	ascii := "abcdefghijklmnopqrstuvwxyz"
+	digits := "0123456789"
+	source := []rune(ascii + strings.ToUpper(ascii) + digits)
+	res := make([]rune, n)
+	for i := 0; i < n; i++ {
+		res[i] = source[rand.Intn(len(source))]
+	}
+	return string(res)
+}
 
 type matrixError struct {
 	Errcode string `json:"errcode"`
@@ -99,7 +115,96 @@ func request(token string, url string, params url.Values) (*http.Response, error
 	return resp, nil
 }
 
+type mfaCreds struct {
+	ClientSecret string `json:"client_secret"`
+	IDServer     string `json:"id_server"`
+	SID          string `json:"sid"`
+	Medium       string `json:"medium"`
+	Bind         bool   `json:"bind"`
+}
+
+func getMFACreds(email string) (*mfaCreds, error) {
+	post := func(url string, req map[string]interface{}, reqResp *map[string]interface{}) error {
+		body, err := json.Marshal(&req)
+		if err != nil {
+			return fmt.Errorf("unable to get MFA creds: %w", err)
+		}
+		bodyReader := io.TeeReader(bytes.NewReader(body), os.Stdout)
+		resp, err := http.Post(url, "application/json", bodyReader)
+		if err != nil {
+			return fmt.Errorf("unable to get MFA creds: %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			mError, err := parseMatrixError(resp.Body)
+			if err != nil {
+				return fmt.Errorf("unable to get MFA creds, unexpected HTTP code: %d", resp.StatusCode)
+			}
+			return fmt.Errorf("unable to get MFA creds: %w", mError)
+		}
+		if err := json.NewDecoder(resp.Body).Decode(reqResp); err != nil {
+			return fmt.Errorf("unable to get MFA creds: %w", err)
+		}
+		return nil
+	}
+	secret := randomString(32)
+	req := map[string]interface{}{
+		"client_secret": secret,
+		"email":         email,
+		"id_server":     idServer,
+		"send_attempt":  1,
+	}
+	var reqResp map[string]interface{}
+	if err := post(baseURL+"/account/mfa/email/requestToken", req, &reqResp); err != nil {
+		return nil, err
+	}
+	success, okSuccess := reqResp["success"].(bool)
+	sid, okSID := reqResp["sid"].(string)
+	if !okSuccess || !okSID {
+		return nil, fmt.Errorf("unable to get MFA creds, invalid response: %v", reqResp)
+	}
+	if !success {
+		return nil, fmt.Errorf("unable to get MFA creds, success field is false: %v", reqResp)
+	}
+	var token string
+	scan := bufio.NewScanner(os.Stdin)
+	fmt.Print("Verification code: ")
+	if scan.Scan() {
+		token = scan.Text()
+	}
+	if err := scan.Err(); err != nil {
+		return nil, fmt.Errorf("unable to get MFA verification code: %w", err)
+	}
+	req = map[string]interface{}{
+		"sid":           sid,
+		"client_secret": secret,
+		"token":         token,
+	}
+	reqResp = nil
+	if err := post(baseIdentityURL+"/validate/email/submitToken", req, &reqResp); err != nil {
+		return nil, err
+	}
+	success, ok := reqResp["success"].(bool)
+	if !ok {
+		return nil, fmt.Errorf("unable to get MFA creds, invalid response: %v", reqResp)
+	}
+	if !success {
+		return nil, fmt.Errorf("unable to get MFA creds, success field is false: %v", reqResp)
+	}
+	return &mfaCreds{
+		ClientSecret: secret,
+		IDServer:     idServer,
+		Medium:       "email",
+		SID:          sid,
+		Bind:         true,
+	}, nil
+}
+
 func getAccessToken(email string, password string) (string, error) {
+	creds, err := getMFACreds(email)
+	if err != nil {
+		return "", fmt.Errorf("unable to get token: %w", err)
+	}
 	userInfo := map[string]interface{}{
 		"type": "m.login.password",
 		"identifier": map[string]string{
@@ -107,7 +212,8 @@ func getAccessToken(email string, password string) (string, error) {
 			"medium":  "email",
 			"address": email,
 		},
-		"password": password,
+		"mfa_creds": creds,
+		"password":  password,
 	}
 	body, err := json.Marshal(&userInfo)
 	if err != nil {
@@ -696,6 +802,7 @@ func downloadFiles(token string, infos []*fileInfo, downloadDir string) []error 
 }
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
 	email := flag.String("email", "", "email address")
 	roomName := flag.String("room-name", "", "name of the room to export")
 	roomID := flag.String("room-id", "", "ID of the room to export")
