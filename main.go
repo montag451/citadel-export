@@ -824,22 +824,25 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to get access token: ", err)
 	}
-	log.Println("Getting available rooms...")
-	rooms, err := getRooms(token)
-	if err != nil {
-		log.Fatal("Failed to get available rooms: ", err)
-	}
-	var room *room
 	if *roomName != "" && *roomID != "" {
 		log.Println("Both flags room-name and room-id has been specified, use room-id")
 	}
+	var r *room
 	if *roomID != "" {
-		for _, r := range rooms {
-			if r.id == *roomID {
-				room = r
-			}
+		name, err := getRoomName(token, *roomID)
+		if err != nil {
+			log.Fatalf("Failed to get room name for room ID %q: %v", *roomID, err)
+		}
+		r = &room{
+			id:   *roomID,
+			name: name,
 		}
 	} else {
+		log.Println("Getting available rooms...")
+		rooms, err := getRooms(token)
+		if err != nil {
+			log.Fatal("Failed to get available rooms: ", err)
+		}
 		groups := groupRoomsByName(rooms)
 		for name, rooms := range groups {
 			if name != *roomName {
@@ -854,18 +857,18 @@ func main() {
 				}
 				os.Exit(1)
 			}
-			room = rooms[0]
+			r = rooms[0]
 		}
-	}
-	if room == nil {
-		log.Fatalf("Room %q not found", *roomName)
+		if r == nil {
+			log.Fatalf("Room %q not found", *roomName)
+		}
 	}
 	log.Println("Fetching room messages...")
 	var dir string
 	if !*reverse {
 		dir = "f"
 	}
-	res, err := getRoomMessages(token, room.id, dir, []string{"m.room.message"})
+	res, err := getRoomMessages(token, r.id, dir, []string{"m.room.message"})
 	if err != nil {
 		log.Fatal("Failed to fetch messages: ", err)
 	}
@@ -903,6 +906,6 @@ func main() {
 		}
 		log.Printf("Re-run the same command to retry the download of failed files")
 	} else {
-		log.Printf("Room %q has been successfully exported to %q\n", room.name, *outputDir)
+		log.Printf("Room %q has been successfully exported to %q\n", r.name, *outputDir)
 	}
 }
