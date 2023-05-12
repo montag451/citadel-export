@@ -19,10 +19,12 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cheggaaa/pb/v3"
 	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/sys/windows"
 )
 
 const (
@@ -751,6 +753,14 @@ func downloadFiles(token string, infos []*fileInfo, downloadDir string) []error 
 	return errors
 }
 
+func init() {
+	stdout := windows.Handle(os.Stdout.Fd())
+	var originalMode uint32
+
+	windows.GetConsoleMode(stdout, &originalMode)
+	windows.SetConsoleMode(stdout, originalMode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+}
+
 func main() {
 	email := flag.String("email", "", "email address")
 	roomName := flag.String("room-name", "", "name of the room to export (* to get all)")
@@ -814,11 +824,13 @@ func main() {
 			log.Fatal(colorRed, "----> Failed to fetch messages:", colorReset, err)
 		}
 
-		downloadDir := filepath.Join(*outputDir, room.name, contentDir)
+		var sanitizedRoomName = strings.TrimSpace(strings.ReplaceAll(room.name, ":", ""))
+
+		downloadDir := filepath.Join(*outputDir, sanitizedRoomName, contentDir)
 		if err := os.MkdirAll(downloadDir, 0755); err != nil {
 			log.Fatalf(colorRed+"----> Failed to create download dir %q"+colorReset, downloadDir)
 		}
-		outputFileName := filepath.Join(*outputDir, room.name, "messages.html")
+		outputFileName := filepath.Join(*outputDir, sanitizedRoomName, "messages.html")
 		output, err := os.Create(outputFileName)
 		if err != nil {
 			log.Fatalf(colorRed+"----> Failed to create output file %q: %v"+colorReset, outputFileName, err)
