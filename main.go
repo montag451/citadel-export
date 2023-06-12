@@ -123,7 +123,7 @@ type mfaCreds struct {
 	Bind         bool   `json:"bind"`
 }
 
-func getMFACreds(email string) (*mfaCreds, error) {
+func getMFACreds(email string, factor string) (*mfaCreds, error) {
 	post := func(url string, req map[string]interface{}, reqResp *map[string]interface{}) error {
 		body, err := json.Marshal(&req)
 		if err != nil {
@@ -155,7 +155,10 @@ func getMFACreds(email string) (*mfaCreds, error) {
 		"send_attempt":  1,
 	}
 	var reqResp map[string]interface{}
-	if err := post(baseURL+"/account/mfa/email/requestToken", req, &reqResp); err != nil {
+	if factor == "sms" {
+		factor = "msisdn"
+	}
+	if err := post(baseURL+"/account/mfa/"+factor+"/requestToken", req, &reqResp); err != nil {
 		return nil, err
 	}
 	success, okSuccess := reqResp["success"].(bool)
@@ -194,14 +197,14 @@ func getMFACreds(email string) (*mfaCreds, error) {
 	return &mfaCreds{
 		ClientSecret: secret,
 		IDServer:     idServer,
-		Medium:       "email",
+		Medium:       factor,
 		SID:          sid,
 		Bind:         true,
 	}, nil
 }
 
-func getAccessToken(email string, password string) (string, error) {
-	creds, err := getMFACreds(email)
+func getAccessToken(email string, password string, mfaFactor string) (string, error) {
+	creds, err := getMFACreds(email, mfaFactor)
 	if err != nil {
 		return "", fmt.Errorf("unable to get token: %w", err)
 	}
@@ -804,6 +807,7 @@ func downloadFiles(token string, infos []*fileInfo, downloadDir string) []error 
 func main() {
 	rand.Seed(time.Now().UnixNano())
 	email := flag.String("email", "", "email address")
+	mfaFactor := flag.String("mfa-factor", "email", "MFA factor (email or sms)")
 	roomName := flag.String("room-name", "", "name of the room to export")
 	roomID := flag.String("room-id", "", "ID of the room to export")
 	passwordFile := flag.String("password-file", "", "file containing password")
@@ -815,12 +819,17 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+	switch *mfaFactor {
+	case "email", "sms":
+	default:
+		log.Fatalf("Invalid MFA factor %q, valid ones are: email, sms", *mfaFactor)
+	}
 	password, err := getPassword(*passwordFile)
 	if err != nil {
 		log.Fatal("Failed to get password: ", err)
 	}
 	log.Println("Getting access token...")
-	token, err := getAccessToken(*email, password)
+	token, err := getAccessToken(*email, password, *mfaFactor)
 	if err != nil {
 		log.Fatal("Failed to get access token: ", err)
 	}
